@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { MediaItem } from '../api/types'
 import { thumbnailUrl, streamUrl, fullImageUrl, updateMediaItem } from '../api/media'
 import { logEvent } from '../api/scan'
+import { useAudioPreference } from '../hooks/useAudioPreference'
 
 // ── Config constants (easy to tweak) ──────────────────────────
 const KEN_BURNS_ENABLED = true
@@ -27,7 +28,7 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
   const navigate = useNavigate()
   const cardRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [muted, setMuted] = useState(true)
+  const { muted, setMuted, toggleMuted } = useAudioPreference()
   const [progress, setProgress] = useState(0)
   const [isFav, setIsFav] = useState(Boolean(item.is_favorite))
   const viewStartTime = useRef<number>(0)
@@ -60,7 +61,7 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
         const entry = entries[0]
         if (entry.isIntersecting && entry.intersectionRatio >= 0.8) {
           video.play().catch(() => {
-            video.muted = true
+            setMuted(true)
             video.play().catch(() => {})
           })
           // Log view_start
@@ -99,7 +100,7 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
       video.pause()
       video.currentTime = 0
     }
-  }, [item.id, item.media_type, isActive])
+  }, [item.id, item.media_type, isActive, setMuted])
 
   // Image view tracking
   useEffect(() => {
@@ -125,6 +126,14 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
     setIsFav(newFav)
     await updateMediaItem(item.id, { is_favorite: newFav })
     if (newFav) logEvent({ media_item_id: item.id, event_type: 'favorite' })
+  }
+
+  const handleFullscreen = async () => {
+    try {
+      await cardRef.current?.requestFullscreen()
+    } catch {
+      // The browser may decline fullscreen if the request is interrupted.
+    }
   }
 
   const orientation = item.orientation || 'landscape'
@@ -198,7 +207,8 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
         {item.media_type === 'video' && (
           <button
             className={`reel-action-btn${!muted ? ' active' : ''}`}
-            onClick={() => setMuted((m) => !m)}
+            onClick={toggleMuted}
+            aria-label={muted ? 'Turn sound on' : 'Mute video'}
           >
             {muted ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -213,6 +223,12 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
             )}
           </button>
         )}
+
+        <button className="reel-action-btn" type="button" onClick={handleFullscreen} aria-label="Open fullscreen">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M3 8V3h5m8 0h5v5M3 16v5h5m8 0h5v-5" />
+          </svg>
+        </button>
 
         {/* Go to grid */}
         <button className="reel-action-btn" onClick={() => navigate(`/explore?folder_id=${item.folder_id}`)}>

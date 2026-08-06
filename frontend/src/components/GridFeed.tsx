@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { listMedia, thumbnailUrl } from '../api/media'
 import type { MediaItem } from '../api/types'
 import type { SortOption } from '../api/media'
@@ -32,6 +32,7 @@ const TYPE_OPTIONS = [
 
 export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps) {
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [items, setItems] = useState<MediaItem[]>([])
   const [total, setTotal] = useState(0)
@@ -103,8 +104,9 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
   }, [hasMore, loading, page, loadPage])
 
   const handleItemClick = (item: MediaItem) => {
-    // Navigate to feed starting at this item's folder
-    navigate(`/?start_id=${item.id}`)
+    navigate(`/media/${item.id}`, {
+      state: { from: `${location.pathname}${location.search}` },
+    })
   }
 
   return (
@@ -154,7 +156,13 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
       ) : (
         <div className="media-grid">
           {items.map((item) => (
-            <div key={item.id} className="grid-item" onClick={() => handleItemClick(item)}>
+            <button
+              key={item.id}
+              className="grid-item"
+              type="button"
+              onClick={() => handleItemClick(item)}
+              aria-label={`Open ${item.title}`}
+            >
               <img
                 src={thumbnailUrl(item.id)}
                 alt={item.title}
@@ -187,7 +195,7 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
                   <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
                 </svg>
               )}
-            </div>
+            </button>
           ))}
 
           {/* Loading skeletons */}

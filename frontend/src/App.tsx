@@ -6,6 +6,8 @@ import { GridFeed } from './components/GridFeed'
 import { FolderProfile } from './components/FolderProfile'
 import { FoldersPage } from './pages/FoldersPage'
 import { SearchPage } from './pages/SearchPage'
+import { MediaViewer } from './components/MediaViewer'
+import { AudioPreferenceProvider } from './contexts/AudioPreferenceProvider'
 import './index.css'
 
 // Favorites page — reuses GridFeed with favoritesOnly filter
@@ -41,25 +43,28 @@ function FeedPage() {
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="app-shell">
-        {/* Scan progress banner (visible across all pages when scan is running) */}
-        <ScanProgress />
+      <AudioPreferenceProvider>
+        <div className="app-shell">
+          {/* Scan progress banner (visible across all pages when scan is running) */}
+          <ScanProgress />
 
-        {/* Page content */}
-        <main className="page-content">
-          <Routes>
-            <Route path="/" element={<FeedPage />} />
-            <Route path="/explore" element={<ExplorePage />} />
-            <Route path="/folders" element={<FoldersPage />} />
-            <Route path="/folders/:id" element={<FolderProfile />} />
-            <Route path="/favorites" element={<FavoritesPage />} />
-            <Route path="/search" element={<SearchPage />} />
-          </Routes>
-        </main>
+          {/* Page content */}
+          <main className="page-content">
+            <Routes>
+              <Route path="/" element={<FeedPage />} />
+              <Route path="/explore" element={<ExplorePage />} />
+              <Route path="/folders" element={<FoldersPage />} />
+              <Route path="/folders/:id" element={<FolderProfile />} />
+              <Route path="/favorites" element={<FavoritesPage />} />
+              <Route path="/search" element={<SearchPage />} />
+              <Route path="/media/:id" element={<MediaViewer />} />
+            </Routes>
+          </main>
 
-        {/* Bottom navigation */}
-        <BottomNav />
-      </div>
+          {/* Bottom navigation */}
+          <BottomNav />
+        </div>
+      </AudioPreferenceProvider>
     </BrowserRouter>
   )
 }
