@@ -3,7 +3,7 @@ Filesystem scanner — walks MEDIA_ROOTS, extracts metadata via ffprobe / Pillow
 and upserts into SQLite. Thumbnails are NOT generated here (lazy, on-demand).
 
 Key design decisions:
-- Incremental: diffs by (path, file_modified_at) — skips unchanged files.
+- Incremental: diffs by (path, file_modified_at, file_size_bytes) — skips unchanged files.
 - Resilient: corrupt/unreadable files are logged and skipped, never crash the scan.
 - Marks files missing from disk as is_active=0 (soft delete to preserve history).
 - GIFs are classified as media_type='video' (autoplaying in feed).
@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,8 @@ from app.config import (
     BROWSER_NATIVE_CONTAINERS,
     IMAGE_EXTENSIONS,
     MEDIA_ROOTS,
+    SCAN_DB_BATCH_SIZE,
+    SCAN_METADATA_WORKERS,
     VIDEO_EXTENSIONS,
 )
 from app.db import get_db
@@ -74,6 +77,13 @@ class ScanState:
 
 _scan_state = ScanState()
 _scan_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class MediaCandidate:
+    path: Path
+    file_size: int
+    file_modified: str
 
 
 def get_scan_state() -> dict:
@@ -137,8 +147,8 @@ def _orientation_from_resolution(width: int, height: int) -> str:
     return "square"
 
 
-def _fmt_modified(path: Path) -> str:
-    ts = os.path.getmtime(str(path))
+def _fmt_modified(stat_result: os.stat_result) -> str:
+    ts = stat_result.st_mtime
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -293,7 +303,12 @@ def _extract_image_metadata(path: Path) -> Optional[dict]:
 
 # ── Folder upsert ──────────────────────────────────────────────────────────
 
-def _upsert_folder(conn, folder_path: Path, root_path: Path) -> int:
+def _upsert_folder(
+    conn,
+    folder_path: Path,
+    root_path: Path,
+    folder_cache: dict[str, int],
+) -> int:
     """
     Ensure a folder row exists for folder_path. Also ensures all parent folders
     up to (but not including) root_path exist. Returns the folder id.
@@ -305,9 +320,38 @@ def _upsert_folder(conn, folder_path: Path, root_path: Path) -> int:
     parent_id = None
     current_path = root_path
 
+    # Media files may live directly in the configured root. Represent that
+    # root as a folder too, otherwise folder_id would be NULL on insert.
+    if not parts:
+        root_str = str(root_path)
+        cached_id = folder_cache.get(root_str)
+        if cached_id is not None:
+            return cached_id
+        row = conn.execute(
+            "SELECT id FROM folders WHERE path = ?", (root_str,)
+        ).fetchone()
+        if row:
+            folder_id = row["id"]
+        else:
+            cursor = conn.execute(
+                """
+                INSERT INTO folders (name, path, parent_folder_id)
+                VALUES (?, ?, NULL)
+                """,
+                (root_path.name or str(root_path), root_str),
+            )
+            folder_id = cursor.lastrowid
+        folder_cache[root_str] = folder_id
+        return folder_id
+
     for part in parts:
         current_path = current_path / part
         path_str = str(current_path)
+
+        cached_id = folder_cache.get(path_str)
+        if cached_id is not None:
+            parent_id = cached_id
+            continue
 
         row = conn.execute(
             "SELECT id FROM folders WHERE path = ?", (path_str,)
@@ -325,6 +369,7 @@ def _upsert_folder(conn, folder_path: Path, root_path: Path) -> int:
             )
             folder_id = cursor.lastrowid
 
+        folder_cache[path_str] = folder_id
         parent_id = folder_id
 
     return parent_id  # type: ignore[return-value]
@@ -332,25 +377,47 @@ def _upsert_folder(conn, folder_path: Path, root_path: Path) -> int:
 
 # ── Main scan logic ────────────────────────────────────────────────────────
 
-def _collect_media_files(roots: list[Path]) -> list[Path]:
-    """Walk roots and collect all media file paths."""
-    all_files = []
+def _collect_media_files(roots: list[Path]) -> list[MediaCandidate]:
+    """Collect media files with os.scandir and reuse discovery stat data."""
+    all_files: list[MediaCandidate] = []
     all_exts = VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
+
+    def walk(directory: Path):
+        try:
+            entries = os.scandir(str(directory))
+        except OSError as e:
+            logger.warning("Cannot scan directory %s: %s", directory, e)
+            return
+
+        with entries:
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        yield from walk(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=False):
+                        if Path(entry.name).suffix.lower() not in all_exts:
+                            continue
+                        stat_result = entry.stat(follow_symlinks=False)
+                        yield MediaCandidate(
+                            path=Path(entry.path),
+                            file_size=stat_result.st_size,
+                            file_modified=_fmt_modified(stat_result),
+                        )
+                except OSError as e:
+                    logger.debug("Cannot inspect %s: %s", entry.path, e)
+
     for root in roots:
         if not root.exists():
             logger.warning("Media root does not exist, skipping: %s", root)
             continue
-        for dirpath, _dirs, files in os.walk(str(root)):
-            for fname in files:
-                if Path(fname).suffix.lower() in all_exts:
-                    all_files.append(Path(dirpath) / fname)
+        all_files.extend(walk(root))
     return all_files
 
 
 def _get_existing_paths(conn) -> dict[str, dict]:
     """Return a dict of path → {id, file_modified_at, is_active} for all DB rows."""
     rows = conn.execute(
-        "SELECT id, path, file_modified_at, is_active FROM media_items"
+        "SELECT id, path, file_modified_at, file_size_bytes, is_active FROM media_items"
     ).fetchall()
     return {r["path"]: dict(r) for r in rows}
 
@@ -402,7 +469,8 @@ def run_scan(roots: list[Path] | None = None) -> None:
 def _do_scan(roots: list[Path]) -> None:
     global _scan_state
 
-    # Phase 1: collect all file paths (fast)
+    # Phase 1: discover files and retain stat data so each candidate is not
+    # stat'ed again later.
     logger.info("Collecting file paths...")
     all_files = _collect_media_files(roots)
 
@@ -410,51 +478,88 @@ def _do_scan(roots: list[Path]) -> None:
         _scan_state.files_total = len(all_files)
     logger.info("Found %d media files", len(all_files))
 
-    # Phase 2: load existing DB entries
+    # Keep one SQLite writer for the scan. Metadata workers never access the
+    # database, which avoids lock contention while eliminating connection and
+    # commit overhead for every file.
     with get_db() as conn:
         existing = _get_existing_paths(conn)
 
-    # Phase 3: mark deleted files inactive
-    existing_paths_on_disk = {str(f) for f in all_files}
-    paths_to_deactivate = [
-        info["id"]
-        for path_str, info in existing.items()
-        if path_str not in existing_paths_on_disk and info["is_active"]
-    ]
-    if paths_to_deactivate:
-        with get_db() as conn:
+        # Phase 2: mark deleted files inactive.
+        existing_paths_on_disk = {str(candidate.path) for candidate in all_files}
+        paths_to_deactivate = [
+            info["id"]
+            for path_str, info in existing.items()
+            if path_str not in existing_paths_on_disk and info["is_active"]
+        ]
+        if paths_to_deactivate:
             conn.executemany(
                 "UPDATE media_items SET is_active = 0 WHERE id = ?",
                 [(pid,) for pid in paths_to_deactivate],
             )
-        logger.info("Marked %d deleted files as inactive", len(paths_to_deactivate))
+            logger.info("Marked %d deleted files as inactive", len(paths_to_deactivate))
 
-    # Phase 4: process each file
-    for file_path in all_files:
-        with _scan_lock:
-            _scan_state.files_scanned += 1
-
-        path_str = str(file_path)
-        file_modified = _fmt_modified(file_path)
-
-        # Skip if unchanged
-        if path_str in existing:
-            db_row = existing[path_str]
-            if db_row["file_modified_at"] == file_modified and db_row["is_active"]:
+        # Phase 3: compare cheap metadata first; only changed files enter the
+        # worker pool. Size catches replacements that retain the same mtime.
+        changed: list[tuple[MediaCandidate, Optional[int]]] = []
+        for candidate in all_files:
+            db_row = existing.get(str(candidate.path))
+            if (
+                db_row
+                and db_row["is_active"]
+                and db_row["file_modified_at"] == candidate.file_modified
+                and db_row["file_size_bytes"] == candidate.file_size
+            ):
                 with _scan_lock:
+                    _scan_state.files_scanned += 1
                     _scan_state.files_skipped += 1
                 continue
-            # File changed or was inactive — reprocess
-            _process_file(file_path, file_modified, existing_id=db_row["id"])
-            with _scan_lock:
-                _scan_state.files_updated += 1
-        else:
-            _process_file(file_path, file_modified, existing_id=None)
-            with _scan_lock:
-                _scan_state.files_new += 1
+            changed.append((candidate, db_row["id"] if db_row else None))
 
-    # Phase 5: update folder item_counts
-    with get_db() as conn:
+        folder_cache: dict[str, int] = {}
+        writes_since_commit = 0
+        worker_count = max(1, SCAN_METADATA_WORKERS)
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="localfeed-meta",
+        ) as executor:
+            futures = {
+                executor.submit(_extract_file_metadata, candidate.path): (
+                    candidate,
+                    existing_id,
+                )
+                for candidate, existing_id in changed
+            }
+            for future in as_completed(futures):
+                candidate, existing_id = futures[future]
+                meta, metadata_error = future.result()
+                if metadata_error:
+                    with _scan_lock:
+                        _scan_state.errors += 1
+                        _scan_state.error_log.append(
+                            f"{candidate.path.name}: {metadata_error}"
+                        )
+
+                _process_file(
+                    conn,
+                    candidate,
+                    meta,
+                    existing_id,
+                    folder_cache,
+                    roots,
+                )
+                with _scan_lock:
+                    _scan_state.files_scanned += 1
+                    if existing_id is None:
+                        _scan_state.files_new += 1
+                    else:
+                        _scan_state.files_updated += 1
+
+                writes_since_commit += 1
+                if writes_since_commit >= max(1, SCAN_DB_BATCH_SIZE):
+                    conn.commit()
+                    writes_since_commit = 0
+
+        # Phase 4: update folder aggregates once after all writes.
         conn.execute(
             """
             UPDATE folders SET item_count = (
@@ -475,24 +580,36 @@ def _do_scan(roots: list[Path]) -> None:
             WHERE cover_thumbnail_path IS NULL
             """
         )
+        conn.commit()
+
+
+def _extract_file_metadata(path: Path) -> tuple[dict, Optional[str]]:
+    """Extract metadata without touching SQLite, suitable for worker threads."""
+    media_type = "video" if path.suffix.lower() in VIDEO_EXTENSIONS else "image"
+    try:
+        raw_meta = (
+            _extract_video_metadata(path)
+            if media_type == "video"
+            else _extract_image_metadata(path)
+        )
+        if raw_meta:
+            return raw_meta, None
+        return {}, f"metadata unavailable for {path.name}"
+    except Exception as e:
+        logger.warning("Metadata error for %s: %s", path, e)
+        return {}, str(e)
 
 
 def _process_file(
-    file_path: Path,
-    file_modified: str,
+    conn,
+    candidate: MediaCandidate,
+    meta: dict,
     existing_id: Optional[int],
+    folder_cache: dict[str, int],
+    roots: list[Path],
 ) -> None:
-    global _scan_state
-
+    file_path = candidate.path
     ext = file_path.suffix.lower()
-
-    try:
-        file_size = os.path.getsize(str(file_path))
-    except OSError as e:
-        logger.warning("Cannot stat %s: %s", file_path, e)
-        with _scan_lock:
-            _scan_state.errors += 1
-        return
 
     # Determine media type
     if ext in VIDEO_EXTENSIONS:
@@ -502,90 +619,63 @@ def _process_file(
     else:
         return  # shouldn't happen, but be safe
 
-    # Extract metadata
-    meta: dict = {}
-    if media_type == "video":
-        try:
-            raw_meta = _extract_video_metadata(file_path)
-            if raw_meta:
-                meta = raw_meta
-            else:
-                logger.warning("ffprobe returned no data for %s", file_path)
-        except Exception as e:
-            logger.warning("Video metadata error for %s: %s", file_path, e)
-            with _scan_lock:
-                _scan_state.errors += 1
-                _scan_state.error_log.append(f"{file_path.name}: {e}")
-    else:
-        try:
-            raw_meta = _extract_image_metadata(file_path)
-            if raw_meta:
-                meta = raw_meta
-        except Exception as e:
-            logger.warning("Image metadata error for %s: %s", file_path, e)
-            with _scan_lock:
-                _scan_state.errors += 1
-                _scan_state.error_log.append(f"{file_path.name}: {e}")
-
     title = _clean_title(file_path.name)
     folder_path = file_path.parent
 
     try:
-        with get_db() as conn:
-            # Determine root for this file
-            root = _find_root(file_path)
-            folder_id = _upsert_folder(conn, folder_path, root)
+        root = _find_root(file_path, roots)
+        folder_id = _upsert_folder(conn, folder_path, root, folder_cache)
 
-            if existing_id is None:
-                conn.execute(
-                    """
-                    INSERT INTO media_items (
-                        folder_id, media_type, filename, path, title,
-                        duration_seconds, codec, browser_native,
-                        resolution, orientation, file_size_bytes,
-                        file_modified_at, captured_at, is_active
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                    """,
-                    (
-                        folder_id,
-                        media_type,
-                        file_path.name,
-                        str(file_path),
-                        title,
-                        meta.get("duration_seconds"),
-                        meta.get("codec"),
-                        1 if meta.get("browser_native", True) else 0,
-                        meta.get("resolution"),
-                        meta.get("orientation"),
-                        file_size,
-                        file_modified,
-                        meta.get("captured_at"),
-                    ),
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE media_items SET
-                        folder_id = ?, title = ?, duration_seconds = ?,
-                        codec = ?, browser_native = ?, resolution = ?,
-                        orientation = ?, file_size_bytes = ?,
-                        file_modified_at = ?, captured_at = ?, is_active = 1
-                    WHERE id = ?
-                    """,
-                    (
-                        folder_id,
-                        title,
-                        meta.get("duration_seconds"),
-                        meta.get("codec"),
-                        1 if meta.get("browser_native", True) else 0,
-                        meta.get("resolution"),
-                        meta.get("orientation"),
-                        file_size,
-                        file_modified,
-                        meta.get("captured_at"),
-                        existing_id,
-                    ),
-                )
+        if existing_id is None:
+            conn.execute(
+                """
+                INSERT INTO media_items (
+                    folder_id, media_type, filename, path, title,
+                    duration_seconds, codec, browser_native,
+                    resolution, orientation, file_size_bytes,
+                    file_modified_at, captured_at, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    folder_id,
+                    media_type,
+                    file_path.name,
+                    str(file_path),
+                    title,
+                    meta.get("duration_seconds"),
+                    meta.get("codec"),
+                    1 if meta.get("browser_native", True) else 0,
+                    meta.get("resolution"),
+                    meta.get("orientation"),
+                    candidate.file_size,
+                    candidate.file_modified,
+                    meta.get("captured_at"),
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE media_items SET
+                    folder_id = ?, title = ?, duration_seconds = ?,
+                    codec = ?, browser_native = ?, resolution = ?,
+                    orientation = ?, file_size_bytes = ?,
+                    file_modified_at = ?, captured_at = ?, is_active = 1
+                WHERE id = ?
+                """,
+                (
+                    folder_id,
+                    title,
+                    meta.get("duration_seconds"),
+                    meta.get("codec"),
+                    1 if meta.get("browser_native", True) else 0,
+                    meta.get("resolution"),
+                    meta.get("orientation"),
+                    candidate.file_size,
+                    candidate.file_modified,
+                    meta.get("captured_at"),
+                    existing_id,
+                ),
+            )
     except Exception as e:
         logger.error("DB error for %s: %s", file_path, e)
         with _scan_lock:
@@ -593,13 +683,16 @@ def _process_file(
             _scan_state.error_log.append(f"{file_path.name}: DB error: {e}")
 
 
-def _find_root(file_path: Path) -> Path:
+def _find_root(file_path: Path, roots: list[Path]) -> Path:
     """Find which MEDIA_ROOT contains this file."""
-    for root in MEDIA_ROOTS:
+    matching_roots = []
+    for root in roots:
         try:
             file_path.relative_to(root)
-            return root
+            matching_roots.append(root)
         except ValueError:
             continue
+    if matching_roots:
+        return max(matching_roots, key=lambda root: len(root.parts))
     # Fallback: use the file's parent as the root
     return file_path.parent
