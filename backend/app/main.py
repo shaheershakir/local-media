@@ -68,6 +68,9 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        # Electron production loads the renderer from file://, which serializes
+        # its request Origin as "null". The backend remains loopback-only.
+        "null",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -92,4 +95,8 @@ def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=True)
+    # The packaged Electron backend is deliberately built without a console.
+    # Uvicorn's default color formatter calls stderr.isatty(), but PyInstaller
+    # exposes stderr as None in that mode. Keep our application logging and
+    # skip only Uvicorn's console-specific logging configuration.
+    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=True, log_config=None)

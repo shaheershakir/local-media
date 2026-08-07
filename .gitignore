@@ -1,0 +1,8 @@
+# Desktop build artifacts
+node_modules/
+dist-electron/
+dist-python/
+release/
+backend/build/
+backend/dist/
+.venv/

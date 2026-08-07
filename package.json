@@ -1,0 +1,41 @@
+{
+  "name": "localfeed-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "LocalFeed desktop shell",
+  "author": "LocalFeed",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm --prefix frontend run dev\" \"npm run dev:electron\"",
+    "dev:electron": "wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 tsx electron/main.ts",
+    "build:renderer": "npm --prefix frontend run build",
+    "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --target=node22 --format=cjs --outdir=dist-electron --external:electron",
+    "build:backend": "python -m PyInstaller --noconfirm --distpath dist-python --workpath backend/build backend/localfeed.spec",
+    "build": "npm run build:renderer && npm run build:electron && npm run build:backend",
+    "dist:win": "npm run build && electron-builder --win",
+    "postinstall": "npm --prefix frontend install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^37.4.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.10",
+    "ffmpeg-static": "^5.2.0",
+    "tsx": "^4.20.6",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.localfeed.app",
+    "productName": "LocalFeed",
+    "directories": { "output": "release" },
+    "files": ["dist-electron/**", "frontend/dist/**", "package.json"],
+    "extraResources": [
+      { "from": "dist-python/localfeed.exe", "to": "backend/localfeed.exe" },
+      { "from": "node_modules/ffmpeg-static/ffmpeg.exe", "to": "ffmpeg/ffmpeg.exe" }
+    ],
+    "asar": true,
+    "win": { "target": ["nsis", "portable"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

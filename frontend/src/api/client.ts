@@ -1,6 +1,7 @@
 // Base API client with typed responses
 
-const BASE_URL = '/api'
+// Vite proxies this in a browser. Electron uses the same routes on its local backend.
+const BASE_URL = window.localfeed?.apiBaseUrl ?? '/api'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, options)

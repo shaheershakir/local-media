@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  // Electron production loads index.html from disk; relative assets keep that working.
+  base: './',
   plugins: [react()],
   server: {
     port: 5173,
