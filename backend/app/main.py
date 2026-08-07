@@ -79,13 +79,14 @@ app.add_middleware(
 )
 
 # Mount routers
-from app.routers import scan, media, feed, folders, events
+from app.routers import scan, media, feed, folders, events, sources
 
 app.include_router(scan.router)
 app.include_router(media.router)
 app.include_router(feed.router)
 app.include_router(folders.router)
 app.include_router(events.router)
+app.include_router(sources.router)
 
 
 @app.get("/api/health")

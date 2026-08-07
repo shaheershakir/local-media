@@ -6,6 +6,7 @@ import { GridFeed } from './components/GridFeed'
 import { FolderProfile } from './components/FolderProfile'
 import { FoldersPage } from './pages/FoldersPage'
 import { SearchPage } from './pages/SearchPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { MediaViewer } from './components/MediaViewer'
 import { MpvFloatingControl } from './components/MpvFloatingControl'
 import { AudioPreferenceProvider } from './contexts/AudioPreferenceProvider'
@@ -58,6 +59,7 @@ export default function App() {
               <Route path="/folders/:id" element={<FolderProfile />} />
               <Route path="/favorites" element={<FavoritesPage />} />
               <Route path="/search" element={<SearchPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="/media/:id" element={<MediaViewer />} />
             </Routes>
           </main>
