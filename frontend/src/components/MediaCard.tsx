@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { MediaItem } from '../api/types'
 import { thumbnailUrl, streamUrl, fullImageUrl, updateMediaItem } from '../api/media'
@@ -17,11 +17,19 @@ interface MediaCardProps {
 }
 
 function formatDuration(seconds: number): string {
+  if (!seconds || isNaN(seconds) || seconds < 0) return '0:00'
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   const s = Math.floor(seconds % 60)
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function formatBytes(bytes?: number | null): string {
+  if (!bytes) return ''
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+  return `${mb.toFixed(1)} MB`
 }
 
 function getFormatExtension(filename: string): string {
@@ -33,18 +41,70 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
   const navigate = useNavigate()
   const cardRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const { muted, setMuted, toggleMuted } = useAudioPreference()
-  const { play: playMpv, isPlayingItem } = useMpv()
-  const [progress, setProgress] = useState(0)
-  const [isFav, setIsFav] = useState(Boolean(item.is_favorite))
+  const scrubberTrackRef = useRef<HTMLDivElement>(null)
+  const hideControlsTimer = useRef<number | null>(null)
   const viewStartTime = useRef<number>(0)
   const hasLoggedStart = useRef(false)
+
+  const { muted, setMuted, toggleMuted, volume, setVolume } = useAudioPreference()
+  const {
+    mpvState,
+    play: playMpv,
+    seek: seekMpv,
+    goToPosition: goToPositionMpv,
+    togglePause: togglePauseMpv,
+    setVolume: setVolumeMpv,
+    toggleMute: toggleMuteMpv,
+    isPlayingItem,
+  } = useMpv()
+
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(item.duration_seconds || 0)
+  const [showControls, setShowControls] = useState(true)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [hoverTime, setHoverTime] = useState<number | null>(null)
+  const [hoverX, setHoverX] = useState<number>(0)
+  const [flashAction, setFlashAction] = useState<'play' | 'pause' | 'seek-fwd' | 'seek-bwd' | null>(null)
+  const [isFav, setIsFav] = useState(Boolean(item.is_favorite))
 
   const isLegacyFormat = item.media_type === 'video' && item.browser_native === 0
   const ext = getFormatExtension(item.filename)
   const isPlayingInMpv = isPlayingItem(item.id)
 
-  // Track which card is in view for infinite scroll prefetch
+  const flash = (action: 'play' | 'pause' | 'seek-fwd' | 'seek-bwd') => {
+    setFlashAction(action)
+    window.setTimeout(() => setFlashAction(null), 450)
+  }
+
+  // Auto-hide controls during active playback
+  const resetHideTimer = useCallback(() => {
+    setShowControls(true)
+    if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current)
+    if (isPlaying) {
+      hideControlsTimer.current = window.setTimeout(() => {
+        setShowControls(false)
+      }, 3000)
+    }
+  }, [isPlaying])
+
+  useEffect(() => {
+    resetHideTimer()
+    return () => {
+      if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current)
+    }
+  }, [resetHideTimer])
+
+  // Track fullscreen changes
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(document.fullscreenElement === cardRef.current)
+    }
+    document.addEventListener('fullscreenchange', handleFsChange)
+    return () => document.removeEventListener('fullscreenchange', handleFsChange)
+  }, [])
+
+  // Infinite scroll threshold prefetch
   useEffect(() => {
     const card = cardRef.current
     if (!card) return
@@ -60,57 +120,81 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
     return () => observer.disconnect()
   }, [index, onCardVisible])
 
-  // Video autoplay via IntersectionObserver
+  // Sync state from MPV if MPV is actively playing this card
+  useEffect(() => {
+    if (isPlayingInMpv) {
+      if (mpvState.duration > 0) setDuration(mpvState.duration)
+      if (mpvState.currentTime >= 0) setCurrentTime(mpvState.currentTime)
+      setIsPlaying(!mpvState.paused)
+    }
+  }, [isPlayingInMpv, mpvState])
+
+  // TikTok-style scroll autoplay / pause
   useEffect(() => {
     if (item.media_type !== 'video') return
     const video = videoRef.current
-    if (!video) return
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        if (entry.isIntersecting && entry.intersectionRatio >= 0.8) {
-          video.play().catch(() => {
-            setMuted(true)
-            video.play().catch(() => {})
-          })
-          // Log view_start
-          if (!hasLoggedStart.current) {
-            hasLoggedStart.current = true
-            viewStartTime.current = Date.now()
-            logEvent({ media_item_id: item.id, event_type: 'view_start' })
-          }
-        } else {
-          if (!video.paused) {
-            logEvent({
-              media_item_id: item.id,
-              event_type: 'skip',
-              watched_seconds: video.currentTime,
+    if (isActive) {
+      if (isLegacyFormat) {
+        playMpv(item).catch(() => {})
+        setIsPlaying(true)
+      } else if (video) {
+        video.muted = muted
+        video.volume = volume / 100
+        const playPromise = video.play()
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              setIsPlaying(true)
+              if (!hasLoggedStart.current) {
+                hasLoggedStart.current = true
+                viewStartTime.current = Date.now()
+                logEvent({ media_item_id: item.id, event_type: 'view_start' })
+              }
             })
-            hasLoggedStart.current = false
-          }
-          video.pause()
-          if (!isActive) {
-            video.currentTime = 0
-          }
+            .catch(() => {
+              // Fallback to muted for this play attempt without clearing global preference
+              video.muted = true
+              video.play().then(() => setIsPlaying(true)).catch(() => {})
+            })
         }
-      },
-      { threshold: [0, 0.8] }
-    )
-    observer.observe(video)
+      }
+    } else {
+      // Immediately pause and reset when scrolling away
+      if (video && !video.paused) {
+        logEvent({
+          media_item_id: item.id,
+          event_type: 'skip',
+          watched_seconds: video.currentTime,
+        })
+        hasLoggedStart.current = false
+        video.pause()
+        video.currentTime = 0
+        setIsPlaying(false)
+        setCurrentTime(0)
+      }
+    }
+
     return () => {
-      observer.disconnect()
-      if (!video.paused) {
+      if (video && !video.paused) {
         logEvent({
           media_item_id: item.id,
           event_type: 'view_end',
           watched_seconds: video.currentTime,
         })
+        video.pause()
+        video.currentTime = 0
       }
-      video.pause()
-      video.currentTime = 0
     }
-  }, [item.id, item.media_type, isActive, setMuted])
+  }, [isActive, item, isLegacyFormat, muted, volume, playMpv])
+
+  // Sync audio preferences to HTML5 video element
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = muted
+      videoRef.current.volume = volume / 100
+    }
+  }, [muted, volume])
 
   // Image view tracking
   useEffect(() => {
@@ -127,8 +211,109 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
 
   const handleVideoTimeUpdate = () => {
     const video = videoRef.current
-    if (!video || !video.duration) return
-    setProgress((video.currentTime / video.duration) * 100)
+    if (!video) return
+    setCurrentTime(video.currentTime)
+    if (video.duration && !isNaN(video.duration)) {
+      setDuration(video.duration)
+    }
+  }
+
+  const togglePlayPause = useCallback(() => {
+    resetHideTimer()
+    if (isPlayingInMpv) {
+      togglePauseMpv()
+      flash(mpvState.paused ? 'play' : 'pause')
+      return
+    }
+
+    const video = videoRef.current
+    if (!video) return
+
+    if (video.paused) {
+      video.play().then(() => {
+        setIsPlaying(true)
+        flash('play')
+      }).catch(() => {})
+    } else {
+      video.pause()
+      setIsPlaying(false)
+      flash('pause')
+    }
+  }, [isPlayingInMpv, mpvState.paused, togglePauseMpv, resetHideTimer])
+
+  const handleSeek = useCallback(
+    (deltaSeconds: number) => {
+      resetHideTimer()
+      const newTime = Math.max(0, Math.min(duration, currentTime + deltaSeconds))
+      if (isPlayingInMpv) {
+        seekMpv(deltaSeconds)
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = newTime
+      }
+      setCurrentTime(newTime)
+      flash(deltaSeconds > 0 ? 'seek-fwd' : 'seek-bwd')
+    },
+    [isPlayingInMpv, seekMpv, duration, currentTime, resetHideTimer]
+  )
+
+  const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    resetHideTimer()
+    const pct = parseFloat(e.target.value)
+    const target = (pct / 100) * duration
+    setCurrentTime(target)
+    if (isPlayingInMpv) {
+      goToPositionMpv(target)
+    } else if (videoRef.current) {
+      videoRef.current.currentTime = target
+    }
+  }
+
+  const handleScrubberMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const track = scrubberTrackRef.current
+    if (!track || !duration) return
+    const rect = track.getBoundingClientRect()
+    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    setHoverTime(pos * duration)
+    setHoverX(e.clientX - rect.left)
+  }
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    resetHideTimer()
+    const val = parseInt(e.target.value, 10)
+    setVolume(val)
+    if (val === 0) {
+      setMuted(true)
+    } else if (muted) {
+      setMuted(false)
+    }
+    if (isPlayingInMpv) {
+      setVolumeMpv(val)
+    } else if (videoRef.current) {
+      videoRef.current.volume = val / 100
+      videoRef.current.muted = val === 0
+    }
+  }
+
+  const handleToggleMute = () => {
+    resetHideTimer()
+    if (isPlayingInMpv) {
+      toggleMuteMpv()
+    } else {
+      toggleMuted()
+    }
+  }
+
+  const handleToggleFullscreen = async () => {
+    resetHideTimer()
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+      } else {
+        await cardRef.current?.requestFullscreen()
+      }
+    } catch {
+      // Browser declined
+    }
   }
 
   const handleFavorite = async (e: React.MouseEvent) => {
@@ -139,131 +324,208 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
     if (newFav) logEvent({ media_item_id: item.id, event_type: 'favorite' })
   }
 
-  const handleFullscreen = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    try {
-      await cardRef.current?.requestFullscreen()
-    } catch {
-      // Browser declined fullscreen
-    }
-  }
-
   const handlePlayWithMpv = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
-    // Pause inline video before launching MPV
     if (videoRef.current && !videoRef.current.paused) {
       videoRef.current.pause()
+      setIsPlaying(false)
     }
-    const currentPos = videoRef.current?.currentTime || 0
+    const currentPos = videoRef.current?.currentTime || currentTime || 0
     await playMpv(item, currentPos)
   }
 
-  const handleCardClick = () => {
+  const handleCardClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.reel-cinema-top-bar, .reel-cinema-bottom-bar, .reel-actions')) {
+      return
+    }
+
     if (item.media_type === 'video') {
-      if (isLegacyFormat) {
-        // Automatically launch MPV for non-browser native video formats
+      if (isLegacyFormat && !isPlayingInMpv) {
         handlePlayWithMpv()
       } else {
-        // Toggle inline play/pause
-        const video = videoRef.current
-        if (video) {
-          if (video.paused) {
-            video.play().catch(() => {})
-          } else {
-            video.pause()
-          }
-        }
+        togglePlayPause()
       }
     } else {
-      // Photo — navigate to viewer
       navigate(`/media/${item.id}`, { state: { from: '/' } })
     }
   }
 
+  // Keyboard shortcut listener when this card is active
+  useEffect(() => {
+    if (!isActive || item.media_type !== 'video') return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault()
+        togglePlayPause()
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        handleSeek(-5)
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        handleSeek(5)
+      } else if (e.key === 'j' || e.key === 'J') {
+        e.preventDefault()
+        handleSeek(-10)
+      } else if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault()
+        handleSeek(10)
+      } else if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault()
+        handleToggleMute()
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault()
+        handleToggleFullscreen()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isActive, item.media_type, togglePlayPause, handleSeek, muted, isPlayingInMpv])
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
   const orientation = item.orientation || 'landscape'
 
   return (
-    <div ref={cardRef} className={`reel-card ${orientation}`} onClick={handleCardClick}>
-      {/* Media element */}
-      {item.media_type === 'video' ? (
-        <video
-          ref={videoRef}
-          className="reel-media-video"
-          src={streamUrl(item.id)}
-          muted={muted}
-          loop
-          playsInline
-          preload="metadata"
-          onTimeUpdate={handleVideoTimeUpdate}
-          onEnded={() => {
-            logEvent({ media_item_id: item.id, event_type: 'view_end', watched_seconds: item.duration_seconds ?? 0 })
-          }}
-        />
-      ) : (
-        <img
-          className={`reel-media-image${KEN_BURNS_ENABLED && isActive ? ' ken-burns' : ''}`}
-          src={isActive ? fullImageUrl(item.id) : thumbnailUrl(item.id)}
-          alt={item.title}
-          loading="lazy"
-        />
-      )}
-
-      {/* Gradient overlay */}
-      <div className="reel-overlay" />
-
-      {/* Legacy Format / MPV Active Indicator */}
-      {item.media_type === 'video' && (
-        <div className="media-format-badges">
-          {isPlayingInMpv && (
-            <div className="badge-mpv-active">
-              <span className="mpv-hud-dot" />
-              MPV PLAYING
-            </div>
-          )}
-          {isLegacyFormat && (
-            <div className="badge-legacy-format" title="Legacy video format — supported via MPV Player">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-              {ext || 'LEGACY'}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Media type badge for images */}
-      {item.media_type === 'image' && (
-        <div className="media-type-badge">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style={{ display: 'inline', marginRight: 4 }}>
-            <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-          </svg>
-          photo
-        </div>
-      )}
-
-      {/* Bottom info */}
-      <div className="reel-info" onClick={(e) => e.stopPropagation()}>
-        <button
-          className="reel-folder-tag"
-          onClick={() => navigate(`/folders/${item.folder_id}`)}
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"/>
-          </svg>
-          {item.folder_label}
-        </button>
-        <div className="reel-title">{item.title}</div>
-        {item.media_type === 'video' && item.duration_seconds && (
-          <div className="reel-duration">{formatDuration(item.duration_seconds)}</div>
+    <div
+      ref={cardRef}
+      className={`reel-card ${orientation}${showControls ? ' show-controls' : ' hide-controls'}`}
+      onClick={handleCardClick}
+      onMouseMove={resetHideTimer}
+      onMouseEnter={resetHideTimer}
+    >
+      {/* Media wrapper with fit aspect ratio (zero distortion/stretching) */}
+      <div className="reel-media-wrapper">
+        {item.media_type === 'video' ? (
+          <video
+            ref={videoRef}
+            className="reel-media-video"
+            src={streamUrl(item.id)}
+            muted={muted}
+            loop
+            playsInline
+            preload="auto"
+            onTimeUpdate={handleVideoTimeUpdate}
+            onLoadedMetadata={() => {
+              if (videoRef.current?.duration) {
+                setDuration(videoRef.current.duration)
+              }
+            }}
+            onEnded={() => {
+              logEvent({
+                media_item_id: item.id,
+                event_type: 'view_end',
+                watched_seconds: item.duration_seconds ?? 0,
+              })
+            }}
+          />
+        ) : (
+          <img
+            className={`reel-media-image${KEN_BURNS_ENABLED && isActive ? ' ken-burns' : ''}`}
+            src={isActive ? fullImageUrl(item.id) : thumbnailUrl(item.id)}
+            alt={item.title}
+            loading="lazy"
+          />
         )}
       </div>
 
-      {/* Right action rail */}
+      {/* Center Flash Action Feedback Indicator */}
+      {flashAction && (
+        <div className="cinema-flash-indicator" aria-hidden="true">
+          {flashAction === 'play' && (
+            <svg width="46" height="46" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="6 4 20 12 6 20 6 4" />
+            </svg>
+          )}
+          {flashAction === 'pause' && (
+            <svg width="46" height="46" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16" rx="1" />
+              <rect x="14" y="4" width="4" height="16" rx="1" />
+            </svg>
+          )}
+          {flashAction === 'seek-fwd' && <div className="cinema-flash-text">+10s</div>}
+          {flashAction === 'seek-bwd' && <div className="cinema-flash-text">-10s</div>}
+        </div>
+      )}
+
+      {/* Cinema Top Header */}
+      <header className="reel-cinema-top-bar" onClick={(e) => e.stopPropagation()}>
+        <div className="cinema-meta-info">
+          <div className="reel-top-row">
+            <button
+              className="reel-folder-tag"
+              type="button"
+              onClick={() => navigate(`/folders/${item.folder_id}`)}
+              title="Filter by folder"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" />
+              </svg>
+              {item.folder_label}
+            </button>
+            <h2 className="cinema-title">{item.title || item.filename}</h2>
+          </div>
+          <div className="cinema-pill-row">
+            {ext && <span className="cinema-pill">{ext}</span>}
+            {item.codec && <span className="cinema-pill">{item.codec}</span>}
+            {item.resolution && <span className="cinema-pill">{item.resolution}</span>}
+            {item.file_size_bytes && <span className="cinema-pill">{formatBytes(item.file_size_bytes)}</span>}
+            {item.media_type === 'video' && (
+              <span className={`cinema-pill pill-engine${isPlayingInMpv ? ' active' : ''}`}>
+                <span className="cinema-engine-dot" />
+                {isPlayingInMpv ? 'MPV RUNNING' : 'CINEMA PLAYER'}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="cinema-top-actions">
+          {item.path && window.localfeed?.revealPath && (
+            <button
+              className="cinema-btn-icon"
+              type="button"
+              onClick={() => window.localfeed?.revealPath(item.path)}
+              title="Reveal in local folder"
+              aria-label="Reveal in local folder"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+            </button>
+          )}
+
+          <button
+            className="cinema-btn-icon"
+            type="button"
+            onClick={handleToggleFullscreen}
+            title={isFullscreen ? 'Exit Fullscreen (F)' : 'Enter Fullscreen (F)'}
+            aria-label="Toggle Fullscreen"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              {isFullscreen ? (
+                <path d="M8 3v5H3m13-5v5h5M8 21v-5H3m18 0h-5v5" />
+              ) : (
+                <path d="M3 8V3h5m8 0h5v5M3 16v5h5m8 0h5v-5" />
+              )}
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      {/* Right Action Rail */}
       <div className="reel-actions" onClick={(e) => e.stopPropagation()}>
         {/* Favorite */}
-        <button className={`reel-action-btn${isFav ? ' active' : ''}`} onClick={handleFavorite} aria-label="Favorite">
+        <button
+          className={`reel-action-btn${isFav ? ' active' : ''}`}
+          type="button"
+          onClick={handleFavorite}
+          aria-label="Favorite"
+          title="Add to Saved"
+        >
           <svg width="20" height="20" viewBox="0 0 24 24" fill={isFav ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5">
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
           </svg>
         </button>
 
@@ -271,9 +533,10 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
         {item.media_type === 'video' && (
           <button
             className={`reel-action-btn btn-mpv-action${isPlayingInMpv ? ' active' : ''}`}
+            type="button"
             onClick={handlePlayWithMpv}
-            title="Play in MPV Cinema (Full Quality & Universal Formats)"
-            aria-label="Play in MPV Cinema"
+            title="Launch in MPV Cinema Player"
+            aria-label="Launch in MPV Cinema Player"
           >
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <polygon points="5 3 19 12 5 21 5 3" fill={isPlayingInMpv ? 'currentColor' : 'none'} />
@@ -281,29 +544,34 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
           </button>
         )}
 
-        {/* Mute toggle (video only) */}
+        {/* Mute Toggle with preserved preference */}
         {item.media_type === 'video' && (
           <button
             className={`reel-action-btn${!muted ? ' active' : ''}`}
-            onClick={toggleMuted}
+            type="button"
+            onClick={handleToggleMute}
+            title={muted ? 'Unmute video (sound on) [M]' : 'Mute video [M]'}
             aria-label={muted ? 'Turn sound on' : 'Mute video'}
           >
             {muted ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <line x1="23" y1="9" x2="17" y2="15" />
+                <line x1="17" y1="9" x2="23" y2="15" />
               </svg>
             ) : (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
               </svg>
             )}
           </button>
         )}
 
-        <button className="reel-action-btn" type="button" onClick={handleFullscreen} aria-label="Open fullscreen">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+        {/* Fullscreen */}
+        <button className="reel-action-btn" type="button" onClick={handleToggleFullscreen} aria-label="Open fullscreen" title="Toggle Fullscreen (F)">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M3 8V3h5m8 0h5v5M3 16v5h5m8 0h5v-5" />
           </svg>
         </button>
@@ -314,7 +582,7 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
           type="button"
           onClick={() => navigate(`/media/${item.id}`, { state: { from: '/' } })}
           aria-label="Open detail viewer"
-          title="Open detail viewer"
+          title="Open Cinema detail viewer"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
@@ -322,19 +590,156 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
         </button>
 
         {/* Go to grid */}
-        <button className="reel-action-btn" onClick={() => navigate(`/explore?folder_id=${item.folder_id}`)} aria-label="Folder items">
+        <button
+          className="reel-action-btn"
+          type="button"
+          onClick={() => navigate(`/explore?folder_id=${item.folder_id}`)}
+          aria-label="Folder items"
+          title="View folder items"
+        >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-            <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
           </svg>
         </button>
       </div>
 
-      {/* Video progress bar */}
+      {/* Reel Cinema Bottom Bar with Scrubber and Controls */}
       {item.media_type === 'video' && (
-        <div className="reel-progress">
-          <div className="reel-progress-fill" style={{ width: `${progress}%` }} />
-        </div>
+        <footer className="reel-cinema-bottom-bar" onClick={(e) => e.stopPropagation()}>
+          {/* Interactive Scrubber Timeline */}
+          <div className="cinema-timeline-wrapper">
+            <div
+              ref={scrubberTrackRef}
+              className="cinema-scrubber-track"
+              onMouseMove={handleScrubberMouseMove}
+              onMouseLeave={() => setHoverTime(null)}
+            >
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="0.05"
+                value={isNaN(progressPercent) ? 0 : progressPercent}
+                onChange={handleScrubberChange}
+                className="cinema-scrubber-input"
+                aria-label="Seek time position"
+              />
+              <div className="cinema-scrubber-fill" style={{ width: `${progressPercent}%` }} />
+              {hoverTime !== null && (
+                <div className="cinema-scrubber-hover-tip" style={{ left: hoverX }}>
+                  {formatDuration(hoverTime)}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Controls Row */}
+          <div className="cinema-controls-row">
+            <div className="cinema-controls-left">
+              {/* Play / Pause */}
+              <button
+                className="cinema-btn-play"
+                type="button"
+                onClick={togglePlayPause}
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+                title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+              >
+                {isPlaying ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="4" width="4" height="16" rx="1" />
+                    <rect x="14" y="4" width="4" height="16" rx="1" />
+                  </svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="6 4 20 12 6 20 6 4" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Jump -10s / +10s */}
+              <button
+                className="cinema-btn-text-icon"
+                type="button"
+                onClick={() => handleSeek(-10)}
+                title="Rewind 10s (J or Left Arrow)"
+                aria-label="Rewind 10 seconds"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5" />
+                </svg>
+                <span>10s</span>
+              </button>
+
+              <button
+                className="cinema-btn-text-icon"
+                type="button"
+                onClick={() => handleSeek(10)}
+                title="Forward 10s (L or Right Arrow)"
+                aria-label="Forward 10 seconds"
+              >
+                <span>10s</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M13 17l5-5-5-5M6 17l5-5-5-5" />
+                </svg>
+              </button>
+
+              {/* Time Stamp Counter */}
+              <div className="cinema-time-counter">
+                <span className="time-current">{formatDuration(currentTime)}</span>
+                <span className="time-sep">/</span>
+                <span className="time-total">{formatDuration(duration || item.duration_seconds || 0)}</span>
+              </div>
+            </div>
+
+            <div className="cinema-controls-right">
+              {/* Volume Group */}
+              <div className="cinema-volume-group">
+                <button
+                  className="cinema-btn-icon"
+                  type="button"
+                  onClick={handleToggleMute}
+                  aria-label={muted ? 'Unmute' : 'Mute'}
+                  title={muted ? 'Unmute (M)' : 'Mute (M)'}
+                >
+                  {muted || volume === 0 ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 5 6 9H2v6h4l5 4V5Z" /><path d="m23 9-6 6m0-6 6 6" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 5 6 9H2v6h4l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" />
+                    </svg>
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={muted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  className="cinema-volume-slider"
+                  aria-label="Adjust volume"
+                />
+              </div>
+
+              {/* Fullscreen */}
+              <button
+                className="cinema-btn-icon"
+                type="button"
+                onClick={handleToggleFullscreen}
+                aria-label="Fullscreen"
+                title="Fullscreen (F)"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 8V3h5m8 0h5v5M3 16v5h5m8 0h5v-5" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </footer>
       )}
     </div>
   )
