@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { type BrowserWindow } from 'electron'
+import { BrowserWindow, type Rectangle } from 'electron'
 
 // node-mpv CommonJS module
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -31,9 +31,9 @@ export interface MpvStatus {
 export class MPVController {
   private mpvInstance: any | null = null
   private mainWindow: BrowserWindow | null = null
+  private playerChildWindow: BrowserWindow | null = null
   private isMpvAvailable: boolean | null = null
   private resolvedBinaryPath: string | null = null
-  private isStarting = false
   private currentStatus: MpvStatus = {
     available: false,
     running: false,
@@ -50,6 +50,27 @@ export class MPVController {
 
   public setMainWindow(win: BrowserWindow | null): void {
     this.mainWindow = win
+  }
+
+  /**
+   * Returns the native Win32 HWND / X11 Window ID string.
+   */
+  private getWindowHandle(win: BrowserWindow): string | null {
+    try {
+      const handle = win.getNativeWindowHandle()
+      if (process.platform === 'win32') {
+        if (handle.length === 8) {
+          return handle.readBigUInt64LE(0).toString()
+        } else if (handle.length === 4) {
+          return handle.readUInt32LE(0).toString()
+        }
+      } else if (process.platform === 'linux') {
+        return handle.readUInt32LE(0).toString()
+      }
+    } catch (e) {
+      console.warn('[mpv] Could not get native window handle:', e)
+    }
+    return null
   }
 
   /**
@@ -145,7 +166,7 @@ export class MPVController {
   }
 
   /**
-   * Initializes node-mpv instance with proper socket and args.
+   * Initializes node-mpv instance with proper window handle embedding (--wid).
    */
   private async ensureMpvInstance(): Promise<any> {
     if (this.mpvInstance && this.currentStatus.running) {
@@ -166,29 +187,31 @@ export class MPVController {
 
     const mpvArgs = [
       '--keep-open=yes',
-      '--force-window=yes',
-      '--autofit=80%x80%',
-      '--geometry=50%:50%',
-      '--title=LocalFeed Cinema',
-      '--osd-level=1',
-      '--osd-font=sans-serif',
-      '--osd-font-size=24',
-      '--osd-color=#f2ede4',
-      '--osd-border-color=#080809',
-      '--osd-border-size=2',
+      '--idle=yes',
+      '--no-border',
+      '--no-window-dragging',
+      '--no-osc', // Disable default MPV OSD so custom React UI controls everything
+      '--no-osd-bar',
       '--hwdec=auto-safe',
+      '--cursor-autohide=500',
     ]
+
+    // Embed directly into the window handle (--wid) so NO separate OS window is spawned
+    if (this.mainWindow) {
+      const hwnd = this.getWindowHandle(this.mainWindow)
+      if (hwnd) {
+        mpvArgs.push(`--wid=${hwnd}`)
+      }
+    }
 
     const mpvOptions = {
       binary,
       socket: socketPath,
       auto_restart: true,
-      time_update: 0.25,
+      time_update: 0.2,
       verbose: false,
       debug: false,
     }
-
-    this.isStarting = true
 
     try {
       const mpv = new NodeMpv(mpvOptions, mpvArgs)
@@ -207,8 +230,6 @@ export class MPVController {
       this.currentStatus.error = error instanceof Error ? error.message : String(error)
       this.broadcastStatus()
       throw error
-    } finally {
-      this.isStarting = false
     }
   }
 
@@ -247,7 +268,7 @@ export class MPVController {
     })
 
     mpv.on('crashed', () => {
-      console.warn('[mpv] MPV process crashed or closed.')
+      console.warn('[mpv] MPV process exited or closed.')
       this.currentStatus.running = false
       this.currentStatus.activePath = undefined
       this.broadcastStatus()
@@ -284,11 +305,17 @@ export class MPVController {
     try {
       await mpv.load(filePath, 'replace')
 
+      try {
+        await mpv.resume()
+      } catch {
+        // Resume if paused
+      }
+
       if (meta?.startTime && meta.startTime > 0) {
         try {
           await mpv.goToPosition(meta.startTime)
         } catch {
-          // Seeking right at start may lag slightly on some formats
+          // Seeking right at start
         }
       }
 
@@ -311,7 +338,9 @@ export class MPVController {
 
   public async pause(): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
-      await this.mpvInstance.pause()
+      try {
+        await this.mpvInstance.pause()
+      } catch {}
       this.currentStatus.paused = true
       this.broadcastStatus()
     }
@@ -319,7 +348,9 @@ export class MPVController {
 
   public async resume(): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
-      await this.mpvInstance.resume()
+      try {
+        await this.mpvInstance.resume()
+      } catch {}
       this.currentStatus.paused = false
       this.broadcastStatus()
     }
@@ -327,7 +358,9 @@ export class MPVController {
 
   public async togglePause(): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
-      await this.mpvInstance.togglePause()
+      try {
+        await this.mpvInstance.togglePause()
+      } catch {}
       this.currentStatus.paused = !this.currentStatus.paused
       this.broadcastStatus()
     }
@@ -350,20 +383,26 @@ export class MPVController {
 
   public async seek(seconds: number): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
-      await this.mpvInstance.seek(seconds)
+      try {
+        await this.mpvInstance.seek(seconds)
+      } catch {}
     }
   }
 
   public async goToPosition(seconds: number): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
-      await this.mpvInstance.goToPosition(seconds)
+      try {
+        await this.mpvInstance.goToPosition(seconds)
+      } catch {}
     }
   }
 
   public async setVolume(volume: number): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
       const clamped = Math.max(0, Math.min(100, volume))
-      await this.mpvInstance.volume(clamped)
+      try {
+        await this.mpvInstance.volume(clamped)
+      } catch {}
       this.currentStatus.volume = clamped
       this.broadcastStatus()
     }
@@ -371,13 +410,19 @@ export class MPVController {
 
   public async toggleMute(): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
-      await this.mpvInstance.toggleMute()
+      try {
+        await this.mpvInstance.toggleMute()
+      } catch {}
       this.currentStatus.muted = !this.currentStatus.muted
       this.broadcastStatus()
     }
   }
 
   public destroy(): void {
+    if (this.playerChildWindow && !this.playerChildWindow.isDestroyed()) {
+      this.playerChildWindow.destroy()
+      this.playerChildWindow = null
+    }
     if (this.mpvInstance) {
       try {
         this.mpvInstance.quit()
