@@ -5,7 +5,7 @@ import { MediaCard } from './MediaCard'
 /**
  * ReelsFeed — full-screen vertical scroll-snap feed.
  * TikTok-style instant autoplay on scroll, active card tracking,
- * and keyboard navigation (ArrowDown / ArrowUp).
+ * proximity-based socket connection management, and keyboard navigation.
  */
 export function ReelsFeed() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -143,12 +143,13 @@ export function ReelsFeed() {
           key={`${item.id}-${index}`}
           item={item}
           index={index}
+          activeIndex={activeIndex}
           isActive={index === activeIndex}
           onCardVisible={onCardVisible}
         />
       ))}
       {/* Loading sentinel */}
-      {loading && (
+      {loading && items.length > 0 && (
         <div className="reel-card" style={{ background: 'var(--c-deep)' }}>
           <div className="text-muted t-label">Loading more…</div>
         </div>

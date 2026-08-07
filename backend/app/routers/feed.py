@@ -75,12 +75,13 @@ def random_feed(
 ):
     """
     Return a randomized batch of media items for the feed.
-    Uses in-memory ID sampling for performance at scale.
+    Uses in-memory ID sampling for high performance.
     """
-    # Parse exclude_ids
+    # Parse exclude_ids (safely cap to avoid unbounded sets)
     excluded: set[int] = set()
     if exclude_ids:
-        for part in exclude_ids.split(","):
+        parts = exclude_ids.split(",")[-100:]  # only consider recent window
+        for part in parts:
             part = part.strip()
             if part.isdigit():
                 excluded.add(int(part))
@@ -90,20 +91,29 @@ def random_feed(
         media_type = None
 
     all_ids = _get_cached_ids(media_type)
+    if not all_ids:
+        return {"items": [], "total_available": 0}
 
     # Filter excluded
     available = [i for i in all_ids if i not in excluded]
 
     if not available:
-        # All items excluded — reset and return from full pool
+        # All items excluded — reset to full pool
         available = all_ids
 
     # Sample random IDs
     sample_size = min(limit, len(available))
-    if sample_size == 0:
-        return {"items": [], "total_available": 0}
-
     sampled_ids = random.sample(available, sample_size)
+
+    # If available items were fewer than requested limit, fill remainder from full pool
+    if len(sampled_ids) < limit and len(all_ids) > len(sampled_ids):
+        pool_remainder = [i for i in all_ids if i not in set(sampled_ids)]
+        fill_size = min(limit - len(sampled_ids), len(pool_remainder))
+        if fill_size > 0:
+            sampled_ids.extend(random.sample(pool_remainder, fill_size))
+
+    if not sampled_ids:
+        return {"items": [], "total_available": len(all_ids)}
 
     # Fetch rows for sampled IDs
     placeholders = ",".join("?" * len(sampled_ids))
@@ -128,5 +138,5 @@ def random_feed(
 
     return {
         "items": items,
-        "total_available": len(available),
+        "total_available": len(all_ids),
     }

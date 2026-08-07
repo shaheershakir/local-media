@@ -12,6 +12,7 @@ const KEN_BURNS_ENABLED = true
 interface MediaCardProps {
   item: MediaItem
   index: number
+  activeIndex?: number
   isActive: boolean
   onCardVisible: (index: number) => void
 }
@@ -37,7 +38,7 @@ function getFormatExtension(filename: string): string {
   return match ? match[1].toUpperCase() : ''
 }
 
-export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardProps) {
+export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }: MediaCardProps) {
   const navigate = useNavigate()
   const cardRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -68,6 +69,8 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
   const [flashAction, setFlashAction] = useState<'play' | 'pause' | 'seek-fwd' | 'seek-bwd' | null>(null)
   const [isFav, setIsFav] = useState(Boolean(item.is_favorite))
 
+  // Virtual proximity window: only mount video stream socket within 1 card of active card
+  const isNearActive = activeIndex !== undefined ? Math.abs(index - activeIndex) <= 1 : isActive
   const isLegacyFormat = item.media_type === 'video' && item.browser_native === 0
   const ext = getFormatExtension(item.filename)
   const isPlayingInMpv = isPlayingItem(item.id)
@@ -129,7 +132,7 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
     }
   }, [isPlayingInMpv, mpvState])
 
-  // TikTok-style scroll autoplay / pause
+  // TikTok-style scroll autoplay / pause + socket release
   useEffect(() => {
     if (item.media_type !== 'video') return
     const video = videoRef.current
@@ -396,31 +399,40 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
       onMouseMove={resetHideTimer}
       onMouseEnter={resetHideTimer}
     >
-      {/* Media wrapper with fit aspect ratio (zero distortion/stretching) */}
+      {/* Media wrapper with fit aspect ratio and virtual socket protection */}
       <div className="reel-media-wrapper">
         {item.media_type === 'video' ? (
-          <video
-            ref={videoRef}
-            className="reel-media-video"
-            src={streamUrl(item.id)}
-            muted={muted}
-            loop
-            playsInline
-            preload="auto"
-            onTimeUpdate={handleVideoTimeUpdate}
-            onLoadedMetadata={() => {
-              if (videoRef.current?.duration) {
-                setDuration(videoRef.current.duration)
-              }
-            }}
-            onEnded={() => {
-              logEvent({
-                media_item_id: item.id,
-                event_type: 'view_end',
-                watched_seconds: item.duration_seconds ?? 0,
-              })
-            }}
-          />
+          isNearActive ? (
+            <video
+              ref={videoRef}
+              className="reel-media-video"
+              src={streamUrl(item.id)}
+              muted={muted}
+              loop
+              playsInline
+              preload={isActive ? 'auto' : 'metadata'}
+              onTimeUpdate={handleVideoTimeUpdate}
+              onLoadedMetadata={() => {
+                if (videoRef.current?.duration) {
+                  setDuration(videoRef.current.duration)
+                }
+              }}
+              onEnded={() => {
+                logEvent({
+                  media_item_id: item.id,
+                  event_type: 'view_end',
+                  watched_seconds: item.duration_seconds ?? 0,
+                })
+              }}
+            />
+          ) : (
+            <img
+              className="reel-media-image"
+              src={thumbnailUrl(item.id)}
+              alt={item.title}
+              loading="lazy"
+            />
+          )
         ) : (
           <img
             className={`reel-media-image${KEN_BURNS_ENABLED && isActive ? ' ken-burns' : ''}`}

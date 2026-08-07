@@ -4,49 +4,75 @@ import type { MediaItem } from '../api/types'
 
 const BATCH_SIZE = 10
 const PREFETCH_THRESHOLD = 3 // load more when N cards from end
+const MAX_EXCLUDE_WINDOW = 25 // sliding window to keep query strings bounded
 
 /**
  * useInfiniteFeed
  *
  * Manages an infinite, non-repeating feed of random media items.
- * Maintains a set of shown IDs to avoid immediate repeats.
- * Fetches the next batch when the user nears the end.
+ * Uses a sliding-window exclusion list to prevent URL parameter explosion.
+ * Protects against infinite re-fetch loops and socket congestion.
  */
 export function useInfiniteFeed(mediaType?: 'video' | 'image' | null) {
   const [items, setItems] = useState<MediaItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const shownIds = useRef<Set<number>>(new Set())
+  
+  // Sliding window of recent IDs (capped to MAX_EXCLUDE_WINDOW)
+  const recentIds = useRef<number[]>([])
   const totalAvailable = useRef(0)
-  // useRef guard — avoids stale closure when `loading` is used as a dep
   const loadingRef = useRef(false)
+  const lastFetchTime = useRef(0)
 
   const fetchBatch = useCallback(async () => {
+    // Guard against simultaneous overlapping fetches
     if (loadingRef.current) return
+    const now = Date.now()
+    if (now - lastFetchTime.current < 250) return // 250ms cooldown
+
     loadingRef.current = true
+    lastFetchTime.current = now
     setLoading(true)
     setError(null)
+
     try {
       const data = await getRandomFeed({
         limit: BATCH_SIZE,
-        exclude_ids: Array.from(shownIds.current),
+        exclude_ids: recentIds.current.slice(-MAX_EXCLUDE_WINDOW),
         media_type: mediaType ?? null,
       })
-      totalAvailable.current = data.total_available
-      const newItems = data.items.filter((item) => !shownIds.current.has(item.id))
-      newItems.forEach((item) => shownIds.current.add(item.id))
 
-      if (newItems.length === 0 && shownIds.current.size > 0) {
-        // Exhausted all items — reset and refetch
-        shownIds.current.clear()
-        const fresh = await getRandomFeed({
-          limit: BATCH_SIZE,
-          media_type: mediaType ?? null,
-        })
-        fresh.items.forEach((item) => shownIds.current.add(item.id))
-        setItems((prev) => [...prev, ...fresh.items])
+      totalAvailable.current = data.total_available
+      const batch = data.items || []
+
+      if (batch.length === 0) {
+        if (recentIds.current.length > 0) {
+          // Reset exclusion window and fetch a fresh batch
+          recentIds.current = []
+          const fresh = await getRandomFeed({
+            limit: BATCH_SIZE,
+            media_type: mediaType ?? null,
+          })
+          if (fresh.items?.length) {
+            fresh.items.forEach((item) => {
+              recentIds.current.push(item.id)
+            })
+            if (recentIds.current.length > MAX_EXCLUDE_WINDOW) {
+              recentIds.current = recentIds.current.slice(-MAX_EXCLUDE_WINDOW)
+            }
+            setItems((prev) => [...prev, ...fresh.items])
+          }
+        }
       } else {
-        setItems((prev) => [...prev, ...newItems])
+        // Track recent IDs with sliding window cap
+        batch.forEach((item) => {
+          recentIds.current.push(item.id)
+        })
+        if (recentIds.current.length > MAX_EXCLUDE_WINDOW) {
+          recentIds.current = recentIds.current.slice(-MAX_EXCLUDE_WINDOW)
+        }
+
+        setItems((prev) => [...prev, ...batch])
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load feed')
@@ -54,7 +80,7 @@ export function useInfiniteFeed(mediaType?: 'video' | 'image' | null) {
       loadingRef.current = false
       setLoading(false)
     }
-  }, [mediaType]) // ← removed `loading` from deps
+  }, [mediaType])
 
   const onCardVisible = useCallback(
     (index: number) => {

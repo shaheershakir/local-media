@@ -184,7 +184,7 @@ def serve_thumbnail(item_id: int):
 
     # Check if cached path still exists
     if thumb_path and Path(thumb_path).exists():
-        return FileResponse(thumb_path, media_type="image/jpeg")
+        return FileResponse(thumb_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
     # Generate thumbnail lazily
     generated: Optional[Path] = None
@@ -199,7 +199,7 @@ def serve_thumbnail(item_id: int):
         # Persist the path
         with get_db() as conn:
             update_thumbnail_in_db(conn, item_id, generated)
-        return FileResponse(str(generated), media_type="image/jpeg")
+        return FileResponse(str(generated), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
     # Return a placeholder response
     raise HTTPException(status_code=404, detail="Thumbnail not available")
@@ -234,7 +234,7 @@ def serve_full_image(item_id: int):
     if ext in (".heic", ".heif"):
         converted = get_or_convert_heic(item_id, str(path))
         if converted and converted.exists():
-            return FileResponse(str(converted), media_type="image/jpeg")
+            return FileResponse(str(converted), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
         raise HTTPException(status_code=415, detail="HEIC conversion unavailable (install pillow-heif)")
 
     # Serve file directly for other formats
@@ -245,7 +245,7 @@ def serve_full_image(item_id: int):
         ".tiff": "image/tiff", ".tif": "image/tiff",
     }
     mime = mime_map.get(ext, "application/octet-stream")
-    return FileResponse(str(path), media_type=mime)
+    return FileResponse(str(path), media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
 
 
 # ── Video streaming with Range support ───────────────────────────────────
@@ -369,7 +369,6 @@ def stream_video(item_id: int, request: Request):
     return _serve_file_with_range(str(file_path), request, content_type)
 
 
-
 def _serve_file_with_range(
     file_path: str, request: Request, content_type: str
 ) -> Response:
@@ -383,6 +382,7 @@ def _serve_file_with_range(
             "Content-Length": str(file_size),
             "Accept-Ranges": "bytes",
             "Content-Type": content_type,
+            "Cache-Control": "public, max-age=3600",
         }
         return StreamingResponse(
             _file_chunk_generator(file_path, 0, file_size - 1),
@@ -405,6 +405,7 @@ def _serve_file_with_range(
         "Content-Length": str(content_length),
         "Accept-Ranges": "bytes",
         "Content-Type": content_type,
+        "Cache-Control": "public, max-age=3600",
     }
     return StreamingResponse(
         _file_chunk_generator(file_path, start, end),
