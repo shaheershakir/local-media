@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { HashRouter, Routes, Route } from 'react-router-dom'
 import { BottomNav } from './components/BottomNav'
 import { ScanProgress } from './components/ScanProgress'
 import { ReelsFeed } from './components/ReelsFeed'
@@ -42,7 +42,7 @@ function FeedPage() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AudioPreferenceProvider>
         <div className="app-shell">
           {/* Scan progress banner (visible across all pages when scan is running) */}
@@ -65,6 +65,6 @@ export default function App() {
           <BottomNav />
         </div>
       </AudioPreferenceProvider>
-    </BrowserRouter>
+    </HashRouter>
   )
 }

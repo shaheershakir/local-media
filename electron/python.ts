@@ -50,7 +50,7 @@ export async function startPythonBackend(): Promise<void> {
   } catch { /* not running yet — proceed to spawn */ }
 
   const { command, args, cwd } = startCommand()
-  backendProcess = spawn(command, args, { cwd, env: backendEnvironment(), stdio: 'inherit', windowsHide: true })
+  backendProcess = spawn(command, args, { cwd, env: backendEnvironment(), stdio: 'ignore', windowsHide: true })
   backendProcess.once('exit', (code, signal) => {
     backendProcess = undefined
     if (!stopping) console.error(`Python backend exited unexpectedly (code ${code}, signal ${signal}).`)
