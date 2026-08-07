@@ -3,23 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { listMedia, thumbnailUrl, updateMediaItem } from '../api/media'
 import { listFolders, getFolder } from '../api/folders'
 import type { MediaItem, Folder } from '../api/types'
-
-function formatDuration(seconds: number): string {
-  if (!seconds || isNaN(seconds) || seconds < 0) return '0:00'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
-function cleanResolution(resolution: string | null): string | null {
-  if (!resolution) return null
-  if (resolution.includes('3840') || resolution.includes('2160')) return '4K UHD'
-  if (resolution.includes('1920') || resolution.includes('1080')) return '1080p HD'
-  if (resolution.includes('1280') || resolution.includes('720')) return '720p HD'
-  return resolution
-}
+import { VideoCard, formatDuration, cleanResolution } from '../components/VideoCard'
 
 interface FolderSectionData {
   folder: Folder
@@ -120,102 +104,16 @@ function MediaShelf({
         )}
 
         <div ref={scrollRef} className="home-shelf-scroll-row">
-          {items.map((item) => {
-            const progressPct =
-              item.duration_seconds && item.duration_watched_seconds
-                ? Math.min(100, Math.round((item.duration_watched_seconds / item.duration_seconds) * 100))
-                : 0
-            const resTag = cleanResolution(item.resolution)
-
-            return (
-              <div
-                key={item.id}
-                className="shelf-media-card"
-                onClick={() => onItemClick(item)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && onItemClick(item)}
-              >
-                <div className="shelf-thumb-wrap">
-                  <img
-                    src={thumbnailUrl(item.id)}
-                    alt={item.title || item.filename}
-                    loading="lazy"
-                    className="shelf-thumb-img"
-                  />
-                  <div className="shelf-play-overlay">
-                    <div className="shelf-play-icon">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                    </div>
-                  </div>
-
-                  {/* Duration Badge */}
-                  {item.duration_seconds && item.media_type === 'video' && (
-                    <span className="shelf-badge shelf-duration-badge">
-                      {formatDuration(item.duration_seconds)}
-                    </span>
-                  )}
-
-                  {/* Resolution Tag */}
-                  {resTag && item.media_type === 'video' && (
-                    <span className="shelf-badge shelf-res-badge">
-                      {resTag}
-                    </span>
-                  )}
-
-                  {/* Photo Badge */}
-                  {item.media_type === 'image' && (
-                    <span className="shelf-badge shelf-photo-badge">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
-                      </svg>
-                    </span>
-                  )}
-
-                  {/* Favorite Toggle Button */}
-                  {onToggleFavorite && (
-                    <button
-                      className={`shelf-fav-btn${item.is_favorite ? ' active' : ''}`}
-                      onClick={(e) => onToggleFavorite(e, item)}
-                      type="button"
-                      aria-label="Toggle favorite"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill={item.is_favorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                      </svg>
-                    </button>
-                  )}
-
-                  {/* Progress Bar for Continue Watching */}
-                  {showProgress && progressPct > 0 && (
-                    <div className="shelf-progress-track">
-                      <div className="shelf-progress-fill" style={{ width: `${progressPct}%` }} />
-                    </div>
-                  )}
-                </div>
-
-                <div className="shelf-card-info">
-                  <div className="shelf-card-title" title={item.title || item.filename}>
-                    {item.title || item.filename}
-                  </div>
-                  <div className="shelf-card-meta">
-                    {showProgress ? (
-                      <span className="shelf-meta-progress">
-                        {formatDuration(item.duration_watched_seconds)} watched ({progressPct}%)
-                      </span>
-                    ) : (
-                      <>
-                        <span className="shelf-meta-folder">{item.folder_label || item.folder_name}</span>
-                        {item.codec && <span className="shelf-meta-codec">• {item.codec.toUpperCase()}</span>}
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+          {items.map((item) => (
+            <VideoCard
+              key={item.id}
+              item={item}
+              layout="shelf"
+              showProgress={showProgress}
+              onItemClick={onItemClick}
+              onToggleFavorite={onToggleFavorite}
+            />
+          ))}
         </div>
 
         {canScrollRight && (
@@ -258,7 +156,7 @@ export function HomePage() {
       })
       setRecentlyAdded(recentRes.items)
 
-      // Choose Hero Featured Item (random from top 5 recent videos or first item)
+      // Choose Hero Featured Item (random from top 6 recent videos or first item)
       if (recentRes.items.length > 0) {
         const heroPool = recentRes.items.slice(0, Math.min(6, recentRes.items.length))
         const pickedHero = heroPool[Math.floor(Math.random() * heroPool.length)]
@@ -273,7 +171,6 @@ export function HomePage() {
       }
 
       // 2. Fetch Continue Watching (videos with duration_watched_seconds > 0)
-      // Check from recent items or query active watched items
       const watched = recentRes.items.filter((it) => it.duration_watched_seconds > 0)
       setContinueWatching(watched)
 
@@ -321,7 +218,7 @@ export function HomePage() {
   }, [loadHomeContent])
 
   const handleOpenMedia = (item: MediaItem) => {
-    navigate(`/media/${item.id}`, { state: { from: '/' } })
+    navigate(`/watch/${item.id}`, { state: { from: '/' } })
   }
 
   const handleToggleFavorite = async (e: React.MouseEvent, item: MediaItem) => {
@@ -329,7 +226,7 @@ export function HomePage() {
     const nextFav = item.is_favorite ? 0 : 1
     try {
       await updateMediaItem(item.id, { is_favorite: Boolean(nextFav) })
-      
+
       // Update state in all collections
       const updater = (list: MediaItem[]) =>
         list.map((it) => (it.id === item.id ? { ...it, is_favorite: nextFav } : it))

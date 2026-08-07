@@ -1,14 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { listMedia, thumbnailUrl } from '../api/media'
+import { listMedia } from '../api/media'
 import type { MediaItem } from '../api/types'
 import type { SortOption } from '../api/media'
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
+import { VideoCard } from './VideoCard'
 
 interface GridFeedProps {
   folderId?: number | null
@@ -162,46 +157,12 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
       ) : (
         <div className="media-grid">
           {items.map((item) => (
-            <button
+            <VideoCard
               key={item.id}
-              className="grid-item"
-              type="button"
-              onClick={() => handleItemClick(item)}
-              aria-label={`Open ${item.title}`}
-            >
-              <img
-                src={thumbnailUrl(item.id)}
-                alt={item.title}
-                loading="lazy"
-              />
-              <div className="grid-item-overlay">
-                {item.media_type === 'video' && (
-                  <div className="grid-item-play">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                      <polygon points="5 3 19 12 5 21 5 3"/>
-                    </svg>
-                  </div>
-                )}
-              </div>
-              {/* Video duration badge */}
-              {item.media_type === 'video' && item.duration_seconds && (
-                <div className="grid-item-duration">
-                  {formatDuration(item.duration_seconds)}
-                </div>
-              )}
-              {/* Photo badge */}
-              {item.media_type === 'image' && (
-                <svg className="grid-item-photo-badge" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-                </svg>
-              )}
-              {/* Favorite indicator */}
-              {Boolean(item.is_favorite) && (
-                <svg className="grid-item-fav" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-                </svg>
-              )}
-            </button>
+              item={item}
+              layout="grid"
+              onItemClick={() => handleItemClick(item)}
+            />
           ))}
 
           {/* Loading skeletons */}
