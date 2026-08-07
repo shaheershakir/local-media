@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import type { MediaItem } from '../api/types'
 import { thumbnailUrl, streamUrl, fullImageUrl, updateMediaItem } from '../api/media'
 import { logEvent } from '../api/scan'
@@ -40,6 +40,7 @@ function getFormatExtension(filename: string): string {
 
 export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }: MediaCardProps) {
   const navigate = useNavigate()
+  const location = useLocation()
   const cardRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const scrubberTrackRef = useRef<HTMLDivElement>(null)
@@ -349,7 +350,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
         togglePlayPause()
       }
     } else {
-      navigate(`/media/${item.id}`, { state: { from: '/' } })
+      navigate(`/media/${item.id}`, { state: { from: `${location.pathname}${location.search}` } })
     }
   }
 
@@ -592,7 +593,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
         <button
           className="reel-action-btn"
           type="button"
-          onClick={() => navigate(`/media/${item.id}`, { state: { from: '/' } })}
+          onClick={() => navigate(`/media/${item.id}`, { state: { from: `${location.pathname}${location.search}` } })}
           aria-label="Open detail viewer"
           title="Open Cinema detail viewer"
         >

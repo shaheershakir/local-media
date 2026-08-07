@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import { BottomNav } from './components/BottomNav'
 import { ScanProgress } from './components/ScanProgress'
+import { HomePage } from './pages/HomePage'
 import { ReelsFeed } from './components/ReelsFeed'
 import { GridFeed } from './components/GridFeed'
 import { FolderProfile } from './components/FolderProfile'
@@ -37,7 +38,7 @@ function ExplorePage() {
   )
 }
 
-// Feed page wrapper — the main page
+// Feed page wrapper — TikTok-style vertical snap reels feed
 function FeedPage() {
   return <ReelsFeed />
 }
@@ -53,7 +54,10 @@ export default function App() {
           {/* Page content */}
           <main className="page-content">
             <Routes>
-              <Route path="/" element={<FeedPage />} />
+              {/* Home is the default page */}
+              <Route path="/" element={<HomePage />} />
+              {/* Feed continues working exactly as before */}
+              <Route path="/feed" element={<FeedPage />} />
               <Route path="/explore" element={<ExplorePage />} />
               <Route path="/folders" element={<FoldersPage />} />
               <Route path="/folders/:id" element={<FolderProfile />} />
