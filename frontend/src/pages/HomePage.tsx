@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listMedia, thumbnailUrl, updateMediaItem } from '../api/media'
+import { listMedia, updateMediaItem } from '../api/media'
 import { listFolders, getFolder } from '../api/folders'
 import type { MediaItem, Folder } from '../api/types'
-import { VideoCard, formatDuration, cleanResolution } from '../components/VideoCard'
+import { HeroBanner } from '../components/HeroBanner'
+import { MediaRow } from '../components/MediaRow'
 
 interface FolderSectionData {
   folder: Folder
@@ -11,129 +12,10 @@ interface FolderSectionData {
   total: number
 }
 
-// ── Horizontal Media Shelf Component with Left/Right Scroll Controls ──────────
-interface MediaShelfProps {
-  title: string
-  subtitle?: string
-  moreLink?: string
-  moreLabel?: string
-  items: MediaItem[]
-  onItemClick: (item: MediaItem) => void
-  onToggleFavorite?: (e: React.MouseEvent, item: MediaItem) => void
-  showProgress?: boolean
-  emptyMessage?: string
-}
-
-function MediaShelf({
-  title,
-  subtitle,
-  moreLink,
-  moreLabel,
-  items,
-  onItemClick,
-  onToggleFavorite,
-  showProgress = false,
-  emptyMessage,
-}: MediaShelfProps) {
-  const navigate = useNavigate()
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [canScrollLeft, setCanScrollLeft] = useState(false)
-  const [canScrollRight, setCanScrollRight] = useState(true)
-
-  const checkScrollButtons = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    setCanScrollLeft(el.scrollLeft > 10)
-    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 10)
-  }, [])
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    checkScrollButtons()
-    el.addEventListener('scroll', checkScrollButtons, { passive: true })
-    window.addEventListener('resize', checkScrollButtons)
-    return () => {
-      el.removeEventListener('scroll', checkScrollButtons)
-      window.removeEventListener('resize', checkScrollButtons)
-    }
-  }, [checkScrollButtons, items.length])
-
-  const handleScroll = (direction: 'left' | 'right') => {
-    const el = scrollRef.current
-    if (!el) return
-    const scrollAmount = el.clientWidth * 0.75
-    el.scrollBy({
-      left: direction === 'left' ? -scrollAmount : scrollAmount,
-      behavior: 'smooth',
-    })
-  }
-
-  if (items.length === 0 && !emptyMessage) return null
-
-  return (
-    <section className="home-shelf-section">
-      <div className="home-shelf-header">
-        <div className="home-shelf-title-group">
-          <h2 className="home-shelf-title">{title}</h2>
-          {subtitle && <span className="home-shelf-subtitle">{subtitle}</span>}
-        </div>
-        {moreLink && (
-          <button
-            className="home-shelf-more-btn"
-            type="button"
-            onClick={() => navigate(moreLink)}
-          >
-            {moreLabel || 'Explore All →'}
-          </button>
-        )}
-      </div>
-
-      <div className="home-shelf-wrapper">
-        {canScrollLeft && (
-          <button
-            className="shelf-arrow-btn shelf-arrow-left"
-            onClick={() => handleScroll('left')}
-            aria-label={`Scroll ${title} left`}
-            type="button"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-        )}
-
-        <div ref={scrollRef} className="home-shelf-scroll-row">
-          {items.map((item) => (
-            <VideoCard
-              key={item.id}
-              item={item}
-              layout="shelf"
-              showProgress={showProgress}
-              onItemClick={onItemClick}
-              onToggleFavorite={onToggleFavorite}
-            />
-          ))}
-        </div>
-
-        {canScrollRight && (
-          <button
-            className="shelf-arrow-btn shelf-arrow-right"
-            onClick={() => handleScroll('right')}
-            aria-label={`Scroll ${title} right`}
-            type="button"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </button>
-        )}
-      </div>
-    </section>
-  )
-}
-
-// ── Main Home Page Component ──────────────────────────────────────────────────
+/**
+ * Modern Netflix / Plex inspired Home Page.
+ * Uses modular HeroBanner and MediaRow components.
+ */
 export function HomePage() {
   const navigate = useNavigate()
 
@@ -250,92 +132,19 @@ export function HomePage() {
 
   return (
     <div className="page-enter home-cinema-view">
-      {/* ── HERO SECTION: Large Featured Media Card ────────────────────────── */}
+      {/* ── HERO SECTION: Large Featured Media Showcase Banner ──────────────── */}
       {heroItem && (
-        <section className="home-hero-showcase">
-          <div className="hero-backdrop-wrap">
-            <img
-              src={thumbnailUrl(heroItem.id)}
-              alt={heroItem.title || heroItem.filename}
-              className="hero-backdrop-img"
-            />
-            <div className="hero-gradient-overlay" />
-            <div className="hero-side-gradient" />
-          </div>
-
-          <div className="hero-content-panel">
-            <div className="hero-badge-row">
-              <span className="hero-badge-tag">
-                {heroItem.media_type === 'video' ? 'Featured Video' : 'Featured Media'}
-              </span>
-              {heroItem.resolution && (
-                <span className="hero-meta-badge">
-                  {cleanResolution(heroItem.resolution) || heroItem.resolution}
-                </span>
-              )}
-              {heroItem.duration_seconds && (
-                <span className="hero-meta-badge">
-                  {formatDuration(heroItem.duration_seconds)}
-                </span>
-              )}
-              {heroItem.codec && (
-                <span className="hero-meta-badge">{heroItem.codec.toUpperCase()}</span>
-              )}
-            </div>
-
-            <h1 className="hero-title" title={heroItem.title || heroItem.filename}>
-              {heroItem.title || heroItem.filename}
-            </h1>
-
-            <div className="hero-folder-tag">
-              📁 {heroItem.folder_label || heroItem.folder_name}
-            </div>
-
-            <div className="hero-actions-row">
-              <button
-                className="hero-btn-play"
-                onClick={() => handleOpenMedia(heroItem)}
-                type="button"
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-                <span>Play Now</span>
-              </button>
-
-              <button
-                className="hero-btn-details"
-                onClick={() => navigate(`/explore?folder_id=${heroItem.folder_id}`)}
-                type="button"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <rect x="3" y="3" width="7" height="7" />
-                  <rect x="14" y="3" width="7" height="7" />
-                  <rect x="14" y="14" width="7" height="7" />
-                  <rect x="3" y="14" width="7" height="7" />
-                </svg>
-                <span>View Folder</span>
-              </button>
-
-              <button
-                className={`hero-btn-fav${heroItem.is_favorite ? ' active' : ''}`}
-                onClick={(e) => handleToggleFavorite(e, heroItem)}
-                type="button"
-                aria-label="Toggle favorite"
-                title={heroItem.is_favorite ? 'Remove from Saved' : 'Save to Favorites'}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill={heroItem.is_favorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </section>
+        <HeroBanner
+          item={heroItem}
+          onPlay={handleOpenMedia}
+          onViewFolder={(folderId) => navigate(`/explore?folder_id=${folderId}`)}
+          onToggleFavorite={handleToggleFavorite}
+        />
       )}
 
       {/* ── CONTINUE WATCHING (Hidden if no watch history exists) ───────────── */}
       {continueWatching.length > 0 && (
-        <MediaShelf
+        <MediaRow
           title="Continue Watching"
           subtitle="Resume playback where you left off"
           items={continueWatching}
@@ -346,7 +155,7 @@ export function HomePage() {
       )}
 
       {/* ── RECENTLY ADDED ─────────────────────────────────────────────────── */}
-      <MediaShelf
+      <MediaRow
         title="Recently Added"
         subtitle="Latest additions to your library"
         moreLink="/explore"
@@ -357,7 +166,7 @@ export function HomePage() {
       />
 
       {/* ── RANDOM PICKS ───────────────────────────────────────────────────── */}
-      <MediaShelf
+      <MediaRow
         title="Random Picks"
         subtitle="Surprise picks & hidden gems from your library"
         items={randomPicks}
@@ -367,7 +176,7 @@ export function HomePage() {
 
       {/* ── DYNAMIC FOLDER SECTIONS (Categories from 1st-level folders) ─────── */}
       {folderSections.map((sec) => (
-        <MediaShelf
+        <MediaRow
           key={sec.folder.id}
           title={sec.folder.display_name || sec.folder.name}
           subtitle={`${sec.total.toLocaleString()} item${sec.total === 1 ? '' : 's'}`}

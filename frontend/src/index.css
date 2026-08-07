@@ -2412,20 +2412,23 @@ body::before {
   position: relative;
 }
 
-.home-shelf-header {
+.home-shelf-header,
+.section-header-component {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   padding: 0 4px;
 }
 
-.home-shelf-title-group {
+.home-shelf-title-group,
+.section-header-title-group {
   display: flex;
   align-items: baseline;
   gap: 12px;
 }
 
-.home-shelf-title {
+.home-shelf-title,
+.section-header-title {
   font-family: var(--font-display);
   font-size: 23px;
   font-weight: 500;
@@ -2433,7 +2436,8 @@ body::before {
   letter-spacing: -0.01em;
 }
 
-.home-shelf-subtitle {
+.home-shelf-subtitle,
+.section-header-subtitle {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--c-muted);
@@ -2441,7 +2445,8 @@ body::before {
   letter-spacing: 0.06em;
 }
 
-.home-shelf-more-btn {
+.home-shelf-more-btn,
+.section-header-more-btn {
   background: transparent;
   border: none;
   color: var(--c-amber);
@@ -2454,7 +2459,8 @@ body::before {
   border-radius: var(--r-sm);
 }
 
-.home-shelf-more-btn:hover {
+.home-shelf-more-btn:hover,
+.section-header-more-btn:hover {
   color: var(--c-amber-hi);
   background: rgba(200, 144, 42, 0.1);
 }
