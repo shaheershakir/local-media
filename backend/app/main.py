@@ -99,4 +99,4 @@ if __name__ == "__main__":
     # Uvicorn's default color formatter calls stderr.isatty(), but PyInstaller
     # exposes stderr as None in that mode. Keep our application logging and
     # skip only Uvicorn's console-specific logging configuration.
-    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=True, log_config=None)
+    uvicorn.run("app.main:app", host=HOST, port=PORT, reload=False, log_config=None)

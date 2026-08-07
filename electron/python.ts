@@ -39,6 +39,16 @@ function startCommand(): { command: string; args: string[]; cwd?: string } {
 export async function startPythonBackend(): Promise<void> {
   if (backendProcess?.pid) return
   stopping = false
+
+  // If a backend is already listening (e.g. a leaked process from a previous run), reuse it.
+  try {
+    const probe = await fetch(HEALTH_URL)
+    if (probe.ok) {
+      console.log('[python] Existing backend detected — reusing it.')
+      return
+    }
+  } catch { /* not running yet — proceed to spawn */ }
+
   const { command, args, cwd } = startCommand()
   backendProcess = spawn(command, args, { cwd, env: backendEnvironment(), stdio: 'inherit', windowsHide: true })
   backendProcess.once('exit', (code, signal) => {

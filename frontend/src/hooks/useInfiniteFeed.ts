@@ -18,9 +18,12 @@ export function useInfiniteFeed(mediaType?: 'video' | 'image' | null) {
   const [error, setError] = useState<string | null>(null)
   const shownIds = useRef<Set<number>>(new Set())
   const totalAvailable = useRef(0)
+  // useRef guard — avoids stale closure when `loading` is used as a dep
+  const loadingRef = useRef(false)
 
   const fetchBatch = useCallback(async () => {
-    if (loading) return
+    if (loadingRef.current) return
+    loadingRef.current = true
     setLoading(true)
     setError(null)
     try {
@@ -48,17 +51,18 @@ export function useInfiniteFeed(mediaType?: 'video' | 'image' | null) {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load feed')
     } finally {
+      loadingRef.current = false
       setLoading(false)
     }
-  }, [loading, mediaType])
+  }, [mediaType]) // ← removed `loading` from deps
 
   const onCardVisible = useCallback(
     (index: number) => {
-      if (!loading && items.length - index <= PREFETCH_THRESHOLD) {
+      if (!loadingRef.current && items.length - index <= PREFETCH_THRESHOLD) {
         fetchBatch()
       }
     },
-    [items.length, loading, fetchBatch]
+    [items.length, fetchBatch]
   )
 
   return { items, loading, error, fetchBatch, onCardVisible }

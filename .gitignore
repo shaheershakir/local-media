@@ -6,3 +6,4 @@ release/
 backend/build/
 backend/dist/
 .venv/
+__pycache__/

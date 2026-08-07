@@ -1,4 +1,4 @@
-import { request } from './client'
+import { request, BASE_URL } from './client'
 import type { MediaItem, PaginatedResponse, FeedResponse } from './types'
 
 export type SortOption = 'newest' | 'oldest' | 'duration' | 'favorites' | 'random' | 'name'
@@ -36,15 +36,15 @@ export async function updateMediaItem(id: number, patch: { is_favorite?: boolean
 }
 
 export function thumbnailUrl(id: number): string {
-  return `/api/media/${id}/thumbnail`
+  return `${BASE_URL}/media/${id}/thumbnail`
 }
 
 export function streamUrl(id: number): string {
-  return `/api/media/${id}/stream`
+  return `${BASE_URL}/media/${id}/stream`
 }
 
 export function fullImageUrl(id: number): string {
-  return `/api/media/${id}/full`
+  return `${BASE_URL}/media/${id}/full`
 }
 
 export async function getRandomFeed(params: {

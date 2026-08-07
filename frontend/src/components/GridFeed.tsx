@@ -36,7 +36,7 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
 
   const [items, setItems] = useState<MediaItem[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
+  const [_page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [sort, setSort] = useState<SortOption>('newest')
@@ -45,10 +45,13 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
   const PAGE_SIZE = 30
   const observerRef = useRef<IntersectionObserver | null>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
+  // useRef guard prevents stale closures — avoids duplicate calls across re-renders
+  const loadingRef = useRef(false)
 
   const loadPage = useCallback(
     async (pageNum: number, reset = false) => {
-      if (loading) return
+      if (loadingRef.current) return
+      loadingRef.current = true
       setLoading(true)
       try {
         const res = await listMedia({
@@ -70,10 +73,11 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
       } catch (e) {
         console.error(e)
       } finally {
+        loadingRef.current = false
         setLoading(false)
       }
     },
-    [sort, mediaType, folderId, favoritesOnly, searchQuery, loading]
+    [sort, mediaType, folderId, favoritesOnly, searchQuery] // ← removed `loading` from deps
   )
 
   // Reset on filter/sort change
@@ -84,15 +88,17 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
     loadPage(1, true)
   }, [sort, mediaType, folderId, favoritesOnly, searchQuery]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Infinite scroll sentinel
+  // Infinite scroll sentinel — only reconstruct observer when hasMore/page changes
   useEffect(() => {
     if (observerRef.current) observerRef.current.disconnect()
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading) {
-          const nextPage = page + 1
-          setPage(nextPage)
-          loadPage(nextPage)
+        if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
+          setPage((prev) => {
+            const nextPage = prev + 1
+            loadPage(nextPage)
+            return nextPage
+          })
         }
       },
       { threshold: 0.1 }
@@ -101,7 +107,7 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
       observerRef.current.observe(sentinelRef.current)
     }
     return () => observerRef.current?.disconnect()
-  }, [hasMore, loading, page, loadPage])
+  }, [hasMore, loadPage])
 
   const handleItemClick = (item: MediaItem) => {
     navigate(`/media/${item.id}`, {
