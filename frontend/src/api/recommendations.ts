@@ -1,5 +1,5 @@
 import { listMedia, getRandomFeed } from './media'
-import type { MediaItem } from './types'
+import type { MediaItem, RecommendationProvider, SimilarVideosQuery } from './types'
 
 export type RecTabType = 'all' | 'watched' | 'recent' | 'random'
 
@@ -7,6 +7,55 @@ export interface PaginatedRecResult {
   items: MediaItem[]
   hasMore: boolean
   page: number
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Pluggable Recommendation Provider Architecture
+// ════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Built-in default local metadata recommendation provider.
+ */
+class LocalMetadataRecommendationProvider implements RecommendationProvider {
+  name = 'local_metadata_engine'
+  version = '1.0.0'
+
+  async getRecommendations(params: {
+    currentId?: number
+    folderId?: number
+    limit?: number
+  }): Promise<MediaItem[]> {
+    const res = await getRecommendationsPage({
+      tab: 'all',
+      page: 1,
+      pageSize: params.limit || 12,
+      currentId: params.currentId,
+      folderId: params.folderId,
+    })
+    return res.items
+  }
+
+  async getSimilarVideos(query: SimilarVideosQuery): Promise<MediaItem[]> {
+    // Basic similarity fallback: query media in same folder or with similar title
+    const res = await listMedia({
+      sort: 'newest',
+      media_type: 'video',
+      page: 1,
+      page_size: query.limit || 10,
+    })
+    return res.items.filter((it) => it.id !== query.targetId)
+  }
+}
+
+// Active provider registry (allows future AI / vector engines to be plugged in seamlessly)
+let activeRecommendationProvider: RecommendationProvider = new LocalMetadataRecommendationProvider()
+
+export function setRecommendationProvider(provider: RecommendationProvider) {
+  activeRecommendationProvider = provider
+}
+
+export function getActiveRecommendationProvider(): RecommendationProvider {
+  return activeRecommendationProvider
 }
 
 /**
