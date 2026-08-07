@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import type { MediaItem } from '../api/types'
 import { thumbnailUrl, updateMediaItem } from '../api/media'
@@ -30,11 +30,11 @@ export interface VideoCardProps {
 }
 
 /**
- * Reusable YouTube / Plex-style VideoCard component.
- * Features generated thumbnails, duration badge, resolution pill,
- * playback progress track, hover animations, and metadata.
+ * Highly optimized, memoized YouTube / Plex-style VideoCard component.
+ * Features asynchronous lazy image loading, duration badges, resolution pills,
+ * playback progress tracks, and smooth hover micro-animations.
  */
-export function VideoCard({
+export const VideoCard = memo(function VideoCard({
   item,
   layout = 'grid',
   showProgress = true,
@@ -45,6 +45,7 @@ export function VideoCard({
   const navigate = useNavigate()
   const location = useLocation()
   const [isFavorite, setIsFavorite] = useState(Boolean(item.is_favorite))
+  const [imageLoaded, setImageLoaded] = useState(false)
 
   const progressPct =
     item.duration_seconds && item.duration_watched_seconds
@@ -93,7 +94,9 @@ export function VideoCard({
           src={thumbnailUrl(item.id)}
           alt={item.title || item.filename}
           loading="lazy"
-          className="video-card-thumb-img"
+          decoding="async"
+          onLoad={() => setImageLoaded(true)}
+          className={`video-card-thumb-img${imageLoaded ? ' loaded' : ''}`}
         />
 
         {/* Hover Play Overlay */}
@@ -177,4 +180,4 @@ export function VideoCard({
       </div>
     </div>
   )
-}
+})

@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { MediaItem } from '../api/types'
 import { VideoCard } from './VideoCard'
@@ -16,10 +16,15 @@ export interface MediaRowProps {
   emptyMessage?: string
 }
 
+const CARD_ESTIMATED_WIDTH = 276 // 260px width + 16px gap
+const OVERSCAN = 3 // Extra cards rendered offscreen on left/right for smooth scrolling
+
 /**
- * Reusable MediaRow component for horizontal video shelves with scroll controls.
+ * High-performance virtualized horizontal MediaRow component.
+ * Features smooth left/right arrow controls, horizontal windowing
+ * to avoid rendering offscreen DOM nodes in long rows, and React.memo.
  */
-export function MediaRow({
+export const MediaRow = memo(function MediaRow({
   title,
   subtitle,
   moreLink,
@@ -32,27 +37,32 @@ export function MediaRow({
 }: MediaRowProps) {
   const navigate = useNavigate()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollLeft, setScrollLeft] = useState(0)
+  const [containerWidth, setContainerWidth] = useState(1200)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(true)
 
-  const checkScrollButtons = useCallback(() => {
+  const checkScrollState = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    setCanScrollLeft(el.scrollLeft > 10)
-    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 10)
+    const sLeft = el.scrollLeft
+    setScrollLeft(sLeft)
+    setContainerWidth(el.clientWidth || 1200)
+    setCanScrollLeft(sLeft > 10)
+    setCanScrollRight(sLeft < el.scrollWidth - el.clientWidth - 10)
   }, [])
 
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    checkScrollButtons()
-    el.addEventListener('scroll', checkScrollButtons, { passive: true })
-    window.addEventListener('resize', checkScrollButtons)
+    checkScrollState()
+    el.addEventListener('scroll', checkScrollState, { passive: true })
+    window.addEventListener('resize', checkScrollState)
     return () => {
-      el.removeEventListener('scroll', checkScrollButtons)
-      window.removeEventListener('resize', checkScrollButtons)
+      el.removeEventListener('scroll', checkScrollState)
+      window.removeEventListener('resize', checkScrollState)
     }
-  }, [checkScrollButtons, items.length])
+  }, [checkScrollState, items.length])
 
   const handleScroll = (direction: 'left' | 'right') => {
     const el = scrollRef.current
@@ -63,6 +73,37 @@ export function MediaRow({
       behavior: 'smooth',
     })
   }
+
+  // ── Horizontal Virtualization Window Calculation ──────────────────────────
+  // Compute visible card index range with overscan
+  const { startIndex, padLeft, padRight, visibleItems } = useMemo(() => {
+    if (items.length <= 8) {
+      // For short rows, render all items directly
+      return {
+        startIndex: 0,
+        padLeft: 0,
+        padRight: 0,
+        visibleItems: items,
+      }
+    }
+
+    const firstVisible = Math.floor(scrollLeft / CARD_ESTIMATED_WIDTH)
+    const visibleCount = Math.ceil(containerWidth / CARD_ESTIMATED_WIDTH)
+
+    const start = Math.max(0, firstVisible - OVERSCAN)
+    const end = Math.min(items.length, firstVisible + visibleCount + OVERSCAN)
+
+    const leftSpacer = start * CARD_ESTIMATED_WIDTH
+    const rightSpacer = Math.max(0, (items.length - end) * CARD_ESTIMATED_WIDTH)
+
+    return {
+      startIndex: start,
+      endIndex: end,
+      padLeft: leftSpacer,
+      padRight: rightSpacer,
+      visibleItems: items.slice(start, end),
+    }
+  }, [items, scrollLeft, containerWidth])
 
   if (items.length === 0 && !emptyMessage) return null
 
@@ -91,9 +132,18 @@ export function MediaRow({
         )}
 
         <div ref={scrollRef} className="home-shelf-scroll-row">
-          {items.map((item) => (
+          {/* Virtual left spacer */}
+          {padLeft > 0 && (
+            <div
+              style={{ width: padLeft, flexShrink: 0, height: 1, pointerEvents: 'none' }}
+              aria-hidden="true"
+            />
+          )}
+
+          {/* Rendered window of cards */}
+          {visibleItems.map((item, idx) => (
             <VideoCard
-              key={item.id}
+              key={item.id || startIndex + idx}
               item={item}
               layout="shelf"
               showProgress={showProgress}
@@ -101,6 +151,14 @@ export function MediaRow({
               onToggleFavorite={onToggleFavorite}
             />
           ))}
+
+          {/* Virtual right spacer */}
+          {padRight > 0 && (
+            <div
+              style={{ width: padRight, flexShrink: 0, height: 1, pointerEvents: 'none' }}
+              aria-hidden="true"
+            />
+          )}
         </div>
 
         {canScrollRight && (
@@ -118,4 +176,4 @@ export function MediaRow({
       </div>
     </section>
   )
-}
+})
