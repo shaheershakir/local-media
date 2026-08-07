@@ -3360,12 +3360,87 @@ body::before {
   border-radius: var(--r-lg);
 }
 
+/* Skeletons and Infinite Scroll for Recommendation Sidebar */
+.video-card-compact-skeleton {
+  height: 86px;
+  width: 100%;
+  border-radius: var(--r-md);
+}
+
+.rec-loading-more-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+  gap: 6px;
+}
+
+.rec-loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-amber);
+  animation: recDotPulse 1.2s infinite ease-in-out both;
+}
+
+.rec-loading-dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.rec-loading-dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes recDotPulse {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+.player-rec-loadmore-btn {
+  background: var(--c-raised);
+  border: 1px dashed var(--c-border);
+  color: var(--c-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 10px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  width: 100%;
+  transition: all var(--t-fast);
+  margin-top: 4px;
+}
+
+.player-rec-loadmore-btn:hover:not(:disabled) {
+  border-color: var(--c-amber);
+  color: var(--c-amber-hi);
+  background: rgba(200, 144, 42, 0.1);
+}
+
+.player-rec-loadmore-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.rec-sentinel {
+  height: 20px;
+  width: 100%;
+  pointer-events: none;
+  opacity: 0;
+}
+
 /* Responsive adjustments */
 @media (max-width: 1100px) {
   .player-layout-grid {
     grid-template-columns: 1fr;
   }
 }
+
 
 
 

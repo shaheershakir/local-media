@@ -2,13 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { getMediaItem, streamUrl, updateMediaItem } from '../api/media'
 import { getFolder } from '../api/folders'
-import { getRecommendations } from '../api/recommendations'
+import { getRecommendationsPage, type RecTabType } from '../api/recommendations'
 import type { MediaItem, Folder } from '../api/types'
 import { VideoCard, formatDuration, cleanResolution } from '../components/VideoCard'
 import { useAudioPreference } from '../hooks/useAudioPreference'
 import { useMpv } from '../hooks/useMpv'
-
-type RecTab = 'all' | 'watched' | 'recent' | 'random'
 
 function formatBytes(bytes?: number | null): string {
   if (!bytes) return ''
@@ -23,22 +21,19 @@ export function PlayerPage() {
   const location = useLocation()
   const videoRef = useRef<HTMLVideoElement>(null)
   const theaterRef = useRef<HTMLDivElement>(null)
+  const recSentinelRef = useRef<HTMLDivElement>(null)
 
   const [item, setItem] = useState<MediaItem | null>(null)
   const [folder, setFolder] = useState<Folder | null>(null)
   const [sameFolderVideos, setSameFolderVideos] = useState<MediaItem[]>([])
-  const [recTab, setRecTab] = useState<RecTab>('all')
-  const [recommendations, setRecommendations] = useState<{
-    recentlyWatched: MediaItem[]
-    recentlyAdded: MediaItem[]
-    randomPicks: MediaItem[]
-    all: MediaItem[]
-  }>({
-    recentlyWatched: [],
-    recentlyAdded: [],
-    randomPicks: [],
-    all: [],
-  })
+  
+  // Recommendation Sidebar State with Lazy-Load / Infinite-Scroll support
+  const [recTab, setRecTab] = useState<RecTabType>('all')
+  const [recItems, setRecItems] = useState<MediaItem[]>([])
+  const [recPage, setRecPage] = useState<number>(1)
+  const [recHasMore, setRecHasMore] = useState<boolean>(true)
+  const [loadingRecs, setLoadingRecs] = useState<boolean>(false)
+  const [loadingMoreRecs, setLoadingMoreRecs] = useState<boolean>(false)
 
   const [isPlaying, setIsPlaying] = useState(true)
   const [currentTime, setCurrentTime] = useState(0)
@@ -62,7 +57,7 @@ export function PlayerPage() {
   const isPoweredByMpv = item ? isPlayingItem(item.id) : false
   const mediaId = Number(id)
 
-  // 1. Fetch current media item, folder siblings, and recommendations
+  // 1. Fetch current media item & sibling videos
   useEffect(() => {
     if (!mediaId || isNaN(mediaId)) return
 
@@ -94,16 +89,6 @@ export function PlayerPage() {
             console.error('Failed to load folder siblings:', fErr)
           }
         }
-
-        // 3. Fetch modular recommendations (recently watched, recently added, random)
-        const recs = await getRecommendations({
-          currentId: media.id,
-          folderId: media.folder_id,
-          limit: 12,
-        })
-        if (!cancelled) {
-          setRecommendations(recs)
-        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Unable to load video')
@@ -120,7 +105,89 @@ export function PlayerPage() {
     }
   }, [mediaId])
 
-  // 2. Autoplay & Range stream / MPV initialization
+  // 2. Load recommendations for the selected tab (initial batch)
+  const loadInitialRecommendations = useCallback(
+    async (tab: RecTabType, currentMediaId: number, folderId?: number) => {
+      setLoadingRecs(true)
+      setRecPage(1)
+      try {
+        const res = await getRecommendationsPage({
+          tab,
+          page: 1,
+          pageSize: 10,
+          currentId: currentMediaId,
+          folderId,
+        })
+        setRecItems(res.items)
+        setRecHasMore(res.hasMore)
+      } catch (err) {
+        console.error('Failed to load initial recommendations:', err)
+        setRecItems([])
+        setRecHasMore(false)
+      } finally {
+        setLoadingRecs(false)
+      }
+    },
+    []
+  )
+
+  // Trigger recommendation reload whenever active tab or media item changes
+  useEffect(() => {
+    if (mediaId) {
+      loadInitialRecommendations(recTab, mediaId, item?.folder_id)
+    }
+  }, [mediaId, recTab, item?.folder_id, loadInitialRecommendations])
+
+  // 3. Lazy-load / Infinite-scroll: fetch next batch of recommendations
+  const loadMoreRecommendations = useCallback(async () => {
+    if (loadingMoreRecs || loadingRecs || !recHasMore || !mediaId) return
+
+    setLoadingMoreRecs(true)
+    const nextPage = recPage + 1
+    try {
+      const res = await getRecommendationsPage({
+        tab: recTab,
+        page: nextPage,
+        pageSize: 10,
+        currentId: mediaId,
+        folderId: item?.folder_id,
+      })
+
+      // Append new items while preventing duplicates
+      setRecItems((prev) => {
+        const seen = new Set(prev.map((i) => i.id))
+        const newOnes = res.items.filter((i) => !seen.has(i.id))
+        return [...prev, ...newOnes]
+      })
+      setRecPage(nextPage)
+      setRecHasMore(res.hasMore)
+    } catch (err) {
+      console.error('Failed to lazy load more recommendations:', err)
+      setRecHasMore(false)
+    } finally {
+      setLoadingMoreRecs(false)
+    }
+  }, [loadingMoreRecs, loadingRecs, recHasMore, mediaId, recPage, recTab, item?.folder_id])
+
+  // 4. Sentinel IntersectionObserver for auto-triggering lazy load
+  useEffect(() => {
+    const sentinel = recSentinelRef.current
+    if (!sentinel) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && recHasMore && !loadingMoreRecs && !loadingRecs) {
+          loadMoreRecommendations()
+        }
+      },
+      { root: null, rootMargin: '300px 0px', threshold: 0.1 }
+    )
+
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [loadMoreRecommendations, recHasMore, loadingMoreRecs, loadingRecs])
+
+  // 5. Autoplay & Range stream / MPV initialization
   useEffect(() => {
     if (!item || item.media_type !== 'video') return
 
@@ -157,7 +224,7 @@ export function PlayerPage() {
     }
   }, [item?.id, item?.browser_native, isMpvAvailable, playMpv])
 
-  // 3. Sync volume and muted state with AudioPreferenceProvider
+  // Sync volume and muted state with AudioPreferenceProvider
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = volume / 100
@@ -165,7 +232,7 @@ export function PlayerPage() {
     }
   }, [volume, muted])
 
-  // 4. Sync duration & time with MPV if active
+  // Sync duration & time with MPV if active
   useEffect(() => {
     if (isPoweredByMpv) {
       if (mpvState.duration > 0) setDuration(mpvState.duration)
@@ -277,16 +344,6 @@ export function PlayerPage() {
       setIsFavorite(Boolean(item.is_favorite))
     }
   }
-
-  // Active recommendations list according to selected tab
-  const activeRecList =
-    recTab === 'watched'
-      ? recommendations.recentlyWatched
-      : recTab === 'recent'
-      ? recommendations.recentlyAdded
-      : recTab === 'random'
-      ? recommendations.randomPicks
-      : recommendations.all
 
   if (loading && !item) {
     return (
@@ -597,7 +654,7 @@ export function PlayerPage() {
           )}
         </main>
 
-        {/* ── RIGHT COLUMN: Recommendation Sidebar ──────────────────────── */}
+        {/* ── RIGHT COLUMN: Recommendation Sidebar with Lazy Load / Infinite Scroll ── */}
         <aside className="player-rec-sidebar" aria-label="Recommended Videos Sidebar">
           <div className="player-rec-header">
             <h2 className="player-rec-title">Recommendations</h2>
@@ -623,26 +680,28 @@ export function PlayerPage() {
               >
                 Random
               </button>
-              {recommendations.recentlyWatched.length > 0 && (
-                <button
-                  className={`player-rec-tab-btn${recTab === 'watched' ? ' active' : ''}`}
-                  onClick={() => setRecTab('watched')}
-                  type="button"
-                >
-                  Watched
-                </button>
-              )}
+              <button
+                className={`player-rec-tab-btn${recTab === 'watched' ? ' active' : ''}`}
+                onClick={() => setRecTab('watched')}
+                type="button"
+              >
+                Watched
+              </button>
             </div>
           </div>
 
-          {/* Compact Sidebar List */}
+          {/* Compact Sidebar List with Infinite Scroll */}
           <div className="player-rec-list">
-            {activeRecList.length === 0 ? (
+            {loadingRecs && recItems.length === 0 ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <div key={`rec-skel-${i}`} className="skeleton video-card-compact-skeleton" />
+              ))
+            ) : recItems.length === 0 ? (
               <div className="player-rec-empty">No additional recommendations found.</div>
             ) : (
-              activeRecList.map((recItem) => (
+              recItems.map((recItem) => (
                 <VideoCard
-                  key={recItem.id}
+                  key={`${recTab}-${recItem.id}`}
                   item={recItem}
                   layout="compact"
                   onItemClick={(v) => {
@@ -651,6 +710,33 @@ export function PlayerPage() {
                 />
               ))
             )}
+
+            {/* Loading more spinner / skeleton chips */}
+            {loadingMoreRecs && (
+              <div className="rec-loading-more-row">
+                <span className="rec-loading-dot" />
+                <span className="rec-loading-dot" />
+                <span className="rec-loading-dot" />
+                <span className="text-muted" style={{ fontSize: 11, marginLeft: 6 }}>
+                  Loading more…
+                </span>
+              </div>
+            )}
+
+            {/* Fallback Load More Button if auto-scroll reaches bottom */}
+            {recHasMore && !loadingRecs && (
+              <button
+                className="player-rec-loadmore-btn"
+                onClick={loadMoreRecommendations}
+                disabled={loadingMoreRecs}
+                type="button"
+              >
+                {loadingMoreRecs ? 'Loading more…' : 'Load more recommendations ↓'}
+              </button>
+            )}
+
+            {/* Invisible sentinel for lazy-loading on scroll */}
+            <div ref={recSentinelRef} className="rec-sentinel" />
           </div>
         </aside>
       </div>

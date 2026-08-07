@@ -1,83 +1,135 @@
 import { listMedia, getRandomFeed } from './media'
 import type { MediaItem } from './types'
 
-export interface RecommendationResult {
-  recentlyWatched: MediaItem[]
-  recentlyAdded: MediaItem[]
-  randomPicks: MediaItem[]
-  all: MediaItem[]
+export type RecTabType = 'all' | 'watched' | 'recent' | 'random'
+
+export interface PaginatedRecResult {
+  items: MediaItem[]
+  hasMore: boolean
+  page: number
 }
 
 /**
- * Modular Recommendation Service.
- * Fetches recently watched, recently added, and random picks.
- * Designed with a clean abstraction so it can easily be swapped
- * with an AI/vector recommendation engine in the future.
+ * Modular Recommendation Service with paginated / lazy-load support.
+ * Fetches batches of recommendations by category (all, watched, recent, random).
+ * Cleanly architected for easy future integration with AI / Vector recommendation engines.
+ */
+export async function getRecommendationsPage(params: {
+  tab: RecTabType
+  page: number
+  pageSize?: number
+  currentId?: number
+  folderId?: number
+}): Promise<PaginatedRecResult> {
+  const pageSize = params.pageSize ?? 12
+  const page = params.page
+  const currentId = params.currentId
+
+  try {
+    if (params.tab === 'recent') {
+      const res = await listMedia({
+        sort: 'newest',
+        media_type: 'video',
+        page,
+        page_size: pageSize + 1, // fetch 1 extra to check hasMore
+      })
+      const filtered = res.items.filter((it) => it.id !== currentId)
+      const items = filtered.slice(0, pageSize)
+      const hasMore = page * pageSize < res.total
+      return { items, hasMore, page }
+    }
+
+    if (params.tab === 'random') {
+      try {
+        const randomRes = await getRandomFeed({
+          limit: pageSize,
+          exclude_ids: currentId ? [currentId] : undefined,
+          media_type: 'video',
+        })
+        const items = (randomRes.items || []).filter((it) => it.id !== currentId)
+        return { items, hasMore: items.length >= pageSize, page }
+      } catch {
+        const res = await listMedia({
+          sort: 'random',
+          media_type: 'video',
+          page,
+          page_size: pageSize,
+        })
+        const items = res.items.filter((it) => it.id !== currentId)
+        return { items, hasMore: page * pageSize < res.total, page }
+      }
+    }
+
+    if (params.tab === 'watched') {
+      const res = await listMedia({
+        sort: 'newest',
+        media_type: 'video',
+        page,
+        page_size: pageSize * 2,
+      })
+      const filtered = res.items
+        .filter((it) => it.id !== currentId && it.duration_watched_seconds > 0)
+        .slice(0, pageSize)
+      const hasMore = page * pageSize < res.total
+      return { items: filtered, hasMore, page }
+    }
+
+    // Default 'all' tab: Mix of recent, watched, and random
+    const [recentRes, randomRes] = await Promise.all([
+      listMedia({
+        sort: 'newest',
+        media_type: 'video',
+        page,
+        page_size: pageSize,
+      }),
+      listMedia({
+        sort: 'random',
+        media_type: 'video',
+        page,
+        page_size: pageSize,
+      }),
+    ])
+
+    const combined: MediaItem[] = []
+    const seenIds = new Set<number>()
+    if (currentId) seenIds.add(currentId)
+
+    for (const item of [...recentRes.items, ...randomRes.items]) {
+      if (!seenIds.has(item.id)) {
+        seenIds.add(item.id)
+        combined.push(item)
+      }
+    }
+
+    const items = combined.slice(0, pageSize)
+    const hasMore = page * pageSize < Math.max(recentRes.total, 50)
+    return { items, hasMore, page }
+  } catch (err) {
+    console.error(`Failed to load recommendation page (tab: ${params.tab}, page: ${page}):`, err)
+    return { items: [], hasMore: false, page }
+  }
+}
+
+/**
+ * Initial fast-fetch bundle for recommendations
  */
 export async function getRecommendations(params: {
   currentId?: number
   folderId?: number
   limit?: number
-}): Promise<RecommendationResult> {
-  const limit = params.limit ?? 15
-  const currentId = params.currentId
+}) {
+  const limit = params.limit ?? 12
+  const [allRes, recentRes, randomRes, watchedRes] = await Promise.all([
+    getRecommendationsPage({ tab: 'all', page: 1, pageSize: limit, currentId: params.currentId, folderId: params.folderId }),
+    getRecommendationsPage({ tab: 'recent', page: 1, pageSize: limit, currentId: params.currentId, folderId: params.folderId }),
+    getRecommendationsPage({ tab: 'random', page: 1, pageSize: limit, currentId: params.currentId, folderId: params.folderId }),
+    getRecommendationsPage({ tab: 'watched', page: 1, pageSize: limit, currentId: params.currentId, folderId: params.folderId }),
+  ])
 
-  try {
-    const [recentRes, randomRes] = await Promise.all([
-      listMedia({
-        sort: 'newest',
-        media_type: 'video',
-        page: 1,
-        page_size: limit * 2,
-      }),
-      getRandomFeed({
-        limit,
-        exclude_ids: currentId ? [currentId] : undefined,
-        media_type: 'video',
-      }).catch(async () => {
-        // Fallback to random sort via listMedia
-        const res = await listMedia({
-          sort: 'random',
-          media_type: 'video',
-          page: 1,
-          page_size: limit,
-        })
-        return { items: res.items, total_available: res.total }
-      }),
-    ])
-
-    const allRecent = recentRes.items.filter((it) => it.id !== currentId)
-    const recentlyWatched = allRecent
-      .filter((it) => it.duration_watched_seconds > 0)
-      .slice(0, limit)
-    const recentlyAdded = allRecent.slice(0, limit)
-    const randomPicks = (randomRes.items || [])
-      .filter((it) => it.id !== currentId)
-      .slice(0, limit)
-
-    // Combined unique recommendations
-    const seenIds = new Set<number>()
-    const all: MediaItem[] = []
-    for (const item of [...recentlyWatched, ...recentlyAdded, ...randomPicks]) {
-      if (!seenIds.has(item.id)) {
-        seenIds.add(item.id)
-        all.push(item)
-      }
-    }
-
-    return {
-      recentlyWatched,
-      recentlyAdded,
-      randomPicks,
-      all: all.slice(0, limit),
-    }
-  } catch (err) {
-    console.error('Failed to fetch recommendations:', err)
-    return {
-      recentlyWatched: [],
-      recentlyAdded: [],
-      randomPicks: [],
-      all: [],
-    }
+  return {
+    all: allRes.items,
+    recentlyAdded: recentRes.items,
+    randomPicks: randomRes.items,
+    recentlyWatched: watchedRes.items,
   }
 }
