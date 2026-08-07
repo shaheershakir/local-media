@@ -4,10 +4,10 @@ import type { MediaItem } from '../api/types'
 import { thumbnailUrl, streamUrl, fullImageUrl, updateMediaItem } from '../api/media'
 import { logEvent } from '../api/scan'
 import { useAudioPreference } from '../hooks/useAudioPreference'
+import { useMpv } from '../hooks/useMpv'
 
-// ── Config constants (easy to tweak) ──────────────────────────
+// ── Config constants ──────────────────────────────────────────
 const KEN_BURNS_ENABLED = true
-// const DWELL_SECONDS = 0 // Set > 0 to auto-advance image cards
 
 interface MediaCardProps {
   item: MediaItem
@@ -24,15 +24,25 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+function getFormatExtension(filename: string): string {
+  const match = filename.match(/\.([0-9a-z]+)(?:[?#]|$)/i)
+  return match ? match[1].toUpperCase() : ''
+}
+
 export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardProps) {
   const navigate = useNavigate()
   const cardRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const { muted, setMuted, toggleMuted } = useAudioPreference()
+  const { play: playMpv, isPlayingItem } = useMpv()
   const [progress, setProgress] = useState(0)
   const [isFav, setIsFav] = useState(Boolean(item.is_favorite))
   const viewStartTime = useRef<number>(0)
   const hasLoggedStart = useRef(false)
+
+  const isLegacyFormat = item.media_type === 'video' && item.browser_native === 0
+  const ext = getFormatExtension(item.filename)
+  const isPlayingInMpv = isPlayingItem(item.id)
 
   // Track which card is in view for infinite scroll prefetch
   useEffect(() => {
@@ -121,25 +131,59 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
     setProgress((video.currentTime / video.duration) * 100)
   }
 
-  const handleFavorite = async () => {
+  const handleFavorite = async (e: React.MouseEvent) => {
+    e.stopPropagation()
     const newFav = !isFav
     setIsFav(newFav)
     await updateMediaItem(item.id, { is_favorite: newFav })
     if (newFav) logEvent({ media_item_id: item.id, event_type: 'favorite' })
   }
 
-  const handleFullscreen = async () => {
+  const handleFullscreen = async (e: React.MouseEvent) => {
+    e.stopPropagation()
     try {
       await cardRef.current?.requestFullscreen()
     } catch {
-      // The browser may decline fullscreen if the request is interrupted.
+      // Browser declined fullscreen
+    }
+  }
+
+  const handlePlayWithMpv = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    // Pause inline video before launching MPV
+    if (videoRef.current && !videoRef.current.paused) {
+      videoRef.current.pause()
+    }
+    const currentPos = videoRef.current?.currentTime || 0
+    await playMpv(item, currentPos)
+  }
+
+  const handleCardClick = () => {
+    if (item.media_type === 'video') {
+      if (isLegacyFormat) {
+        // Automatically launch MPV for non-browser native video formats
+        handlePlayWithMpv()
+      } else {
+        // Toggle inline play/pause
+        const video = videoRef.current
+        if (video) {
+          if (video.paused) {
+            video.play().catch(() => {})
+          } else {
+            video.pause()
+          }
+        }
+      }
+    } else {
+      // Photo — navigate to viewer
+      navigate(`/media/${item.id}`, { state: { from: '/' } })
     }
   }
 
   const orientation = item.orientation || 'landscape'
 
   return (
-    <div ref={cardRef} className={`reel-card ${orientation}`}>
+    <div ref={cardRef} className={`reel-card ${orientation}`} onClick={handleCardClick}>
       {/* Media element */}
       {item.media_type === 'video' ? (
         <video
@@ -167,6 +211,26 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
       {/* Gradient overlay */}
       <div className="reel-overlay" />
 
+      {/* Legacy Format / MPV Active Indicator */}
+      {item.media_type === 'video' && (
+        <div className="media-format-badges">
+          {isPlayingInMpv && (
+            <div className="badge-mpv-active">
+              <span className="mpv-hud-dot" />
+              MPV PLAYING
+            </div>
+          )}
+          {isLegacyFormat && (
+            <div className="badge-legacy-format" title="Legacy video format — supported via MPV Player">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              {ext || 'LEGACY'}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Media type badge for images */}
       {item.media_type === 'image' && (
         <div className="media-type-badge">
@@ -178,7 +242,7 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
       )}
 
       {/* Bottom info */}
-      <div className="reel-info">
+      <div className="reel-info" onClick={(e) => e.stopPropagation()}>
         <button
           className="reel-folder-tag"
           onClick={() => navigate(`/folders/${item.folder_id}`)}
@@ -195,13 +259,27 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
       </div>
 
       {/* Right action rail */}
-      <div className="reel-actions">
+      <div className="reel-actions" onClick={(e) => e.stopPropagation()}>
         {/* Favorite */}
-        <button className={`reel-action-btn${isFav ? ' active' : ''}`} onClick={handleFavorite}>
+        <button className={`reel-action-btn${isFav ? ' active' : ''}`} onClick={handleFavorite} aria-label="Favorite">
           <svg width="20" height="20" viewBox="0 0 24 24" fill={isFav ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5">
             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
           </svg>
         </button>
+
+        {/* MPV Cinema Player Trigger for Videos */}
+        {item.media_type === 'video' && (
+          <button
+            className={`reel-action-btn btn-mpv-action${isPlayingInMpv ? ' active' : ''}`}
+            onClick={handlePlayWithMpv}
+            title="Play in MPV Cinema (Full Quality & Universal Formats)"
+            aria-label="Play in MPV Cinema"
+          >
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <polygon points="5 3 19 12 5 21 5 3" fill={isPlayingInMpv ? 'currentColor' : 'none'} />
+            </svg>
+          </button>
+        )}
 
         {/* Mute toggle (video only) */}
         {item.media_type === 'video' && (
@@ -230,8 +308,21 @@ export function MediaCard({ item, index, isActive, onCardVisible }: MediaCardPro
           </svg>
         </button>
 
+        {/* Open in full viewer */}
+        <button
+          className="reel-action-btn"
+          type="button"
+          onClick={() => navigate(`/media/${item.id}`, { state: { from: '/' } })}
+          aria-label="Open detail viewer"
+          title="Open detail viewer"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          </svg>
+        </button>
+
         {/* Go to grid */}
-        <button className="reel-action-btn" onClick={() => navigate(`/explore?folder_id=${item.folder_id}`)}>
+        <button className="reel-action-btn" onClick={() => navigate(`/explore?folder_id=${item.folder_id}`)} aria-label="Folder items">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
             <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>

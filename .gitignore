@@ -6,4 +6,4 @@ release/
 backend/build/
 backend/dist/
 .venv/
-__pycache__/
+**/__pycache__/

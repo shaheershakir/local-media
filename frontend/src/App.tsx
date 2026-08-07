@@ -7,6 +7,7 @@ import { FolderProfile } from './components/FolderProfile'
 import { FoldersPage } from './pages/FoldersPage'
 import { SearchPage } from './pages/SearchPage'
 import { MediaViewer } from './components/MediaViewer'
+import { MpvFloatingControl } from './components/MpvFloatingControl'
 import { AudioPreferenceProvider } from './contexts/AudioPreferenceProvider'
 import './index.css'
 
@@ -60,6 +61,9 @@ export default function App() {
               <Route path="/media/:id" element={<MediaViewer />} />
             </Routes>
           </main>
+
+          {/* Floating MPV Playback Controller */}
+          <MpvFloatingControl />
 
           {/* Bottom navigation */}
           <BottomNav />

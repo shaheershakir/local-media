@@ -1,6 +1,7 @@
 import { app, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron'
 import { createMainWindow } from './window'
 import { startPythonBackend, stopPythonBackend } from './python'
+import { mpvController, type MpvPlaybackMetadata } from './mpv'
 
 let mainWindow: Awaited<ReturnType<typeof createMainWindow>> | undefined
 let tray: Tray | undefined
@@ -30,17 +31,65 @@ function registerNativeApis(): void {
     new Notification({ title: String(payload.title), body: String(payload.body) }).show()
   })
   ipcMain.handle('shell:reveal-path', (_event, path: string) => shell.showItemInFolder(String(path)))
+
+  // ── MPV Player IPC Handlers ─────────────────────────────────────
+  ipcMain.handle('mpv:is-available', async () => {
+    return await mpvController.checkAvailability()
+  })
+  ipcMain.handle('mpv:get-status', () => {
+    return mpvController.getStatus()
+  })
+  ipcMain.handle('mpv:play', async (_event, payload: { filePath: string; meta?: MpvPlaybackMetadata }) => {
+    return await mpvController.play(payload.filePath, payload.meta)
+  })
+  ipcMain.handle('mpv:pause', async () => {
+    await mpvController.pause()
+    return true
+  })
+  ipcMain.handle('mpv:resume', async () => {
+    await mpvController.resume()
+    return true
+  })
+  ipcMain.handle('mpv:toggle-pause', async () => {
+    await mpvController.togglePause()
+    return true
+  })
+  ipcMain.handle('mpv:stop', async () => {
+    await mpvController.stop()
+    return true
+  })
+  ipcMain.handle('mpv:seek', async (_event, seconds: number) => {
+    await mpvController.seek(seconds)
+    return true
+  })
+  ipcMain.handle('mpv:go-to-position', async (_event, seconds: number) => {
+    await mpvController.goToPosition(seconds)
+    return true
+  })
+  ipcMain.handle('mpv:set-volume', async (_event, volume: number) => {
+    await mpvController.setVolume(volume)
+    return true
+  })
+  ipcMain.handle('mpv:toggle-mute', async () => {
+    await mpvController.toggleMute()
+    return true
+  })
 }
 
 app.whenReady().then(async () => {
   registerNativeApis()
   await startPythonBackend()
   mainWindow = await createMainWindow()
+  mpvController.setMainWindow(mainWindow)
   // createFutureTray() is ready for a branded app icon and close-to-tray behavior.
   void createFutureTray
   app.on('activate', async () => {
-    if (mainWindow) mainWindow.show()
-    else mainWindow = await createMainWindow()
+    if (mainWindow) {
+      mainWindow.show()
+    } else {
+      mainWindow = await createMainWindow()
+      mpvController.setMainWindow(mainWindow)
+    }
   })
 }).catch((error: unknown) => {
   dialog.showErrorBox('LocalFeed failed to start', error instanceof Error ? error.message : String(error))
@@ -48,6 +97,8 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  mpvController.destroy()
   stopPythonBackend()
   tray?.destroy()
 })
+

@@ -322,12 +322,7 @@ def _ffmpeg_pipe_generator(
 def stream_video(item_id: int, request: Request):
     """
     Stream a video with HTTP Range request support (206 Partial Content).
-
-    For browser-native files: serves bytes directly from disk.
-    For needs_transcode files:
-      1. If already transcoded and cached → serve from cache with Range support.
-      2. Otherwise → pipe ffmpeg output directly (no Range support, seek = keyframe restart).
-         Simultaneously writes to cache so subsequent views serve from disk.
+    Enables full-duration playback and smooth seeking across the feed and viewer.
     """
     with get_db() as conn:
         row = conn.execute(
@@ -344,48 +339,35 @@ def stream_video(item_id: int, request: Request):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    browser_native = bool(row["browser_native"])
     ext = file_path.suffix.lower()
 
-    # GIF: always transcode to mp4 for <video> tag support
-    if ext == ".gif":
-        browser_native = False
+    mime_types = {
+        ".mp4": "video/mp4",
+        ".m4v": "video/mp4",
+        ".mov": "video/mp4",
+        ".webm": "video/webm",
+        ".ogv": "video/ogg",
+        ".mkv": "video/mp4",
+        ".avi": "video/mp4",
+        ".ts": "video/mp2t",
+        ".mts": "video/mp2t",
+    }
+    content_type = mime_types.get(ext, "video/mp4")
 
-    # ── Path 1: browser-native file — serve directly with Range support ──
-    if browser_native:
-        return _serve_file_with_range(str(file_path), request, "video/mp4")
-
-    # ── Path 2: needs transcode ───────────────────────────────────────────
+    # If transcoded file already exists, serve it
     transcoded_path = get_transcoded_path(item_id)
-
     if transcoded_path.exists():
-        # Already cached — serve with Range support
         return _serve_file_with_range(str(transcoded_path), request, "video/mp4")
 
-    # Check if a Range header was sent (seeking attempt on live transcode)
-    range_header = request.headers.get("range", "")
-    seek_seconds = 0.0
-    if range_header:
-        # Best-effort: estimate seek position (not accurate, keyframe only)
-        match = re.match(r"bytes=(\d+)-", range_header)
-        if match and row["duration_seconds"]:
-            byte_offset = int(match.group(1))
-            # Rough bitrate estimate: assume 2 Mbps average
-            estimated_bitrate_bytes_per_sec = 250_000
-            seek_seconds = byte_offset / estimated_bitrate_bytes_per_sec
-            seek_seconds = min(seek_seconds, row["duration_seconds"] - 1)
+    # For GIF or legacy non-playable files, transcode on-demand and cache
+    if ext in (".gif", ".wmv", ".flv", ".3gp"):
+        transcoded = transcode_video(item_id, str(file_path))
+        if transcoded and transcoded.exists():
+            return _serve_file_with_range(str(transcoded), request, "video/mp4")
 
-    # Stream live from ffmpeg
-    headers = {
-        "Content-Type": "video/mp4",
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "no-cache",
-    }
-    return StreamingResponse(
-        _ffmpeg_pipe_generator(str(file_path), seek_seconds),
-        status_code=200,
-        headers=headers,
-    )
+    # Serve original file directly with full 206 Range support
+    return _serve_file_with_range(str(file_path), request, content_type)
+
 
 
 def _serve_file_with_range(
