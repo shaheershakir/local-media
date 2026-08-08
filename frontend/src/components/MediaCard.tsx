@@ -61,7 +61,11 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
     isPlayingItem,
   } = useMpv()
 
+  const isLegacy = item.media_type === 'video' && item.browser_native === 0
+  const isPlayingInMpv = isPlayingItem(item.id)
+
   const [isPlaying, setIsPlaying] = useState(false)
+  const [streamOffset, setStreamOffset] = useState<number>(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(item.duration_seconds || 0)
   const [isScrubbing, setIsScrubbing] = useState(false)
@@ -79,9 +83,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
 
   // Virtual proximity window: only mount video stream socket within 1 card of active card
   const isNearActive = activeIndex !== undefined ? Math.abs(index - activeIndex) <= 1 : isActive
-  const isLegacyFormat = item.media_type === 'video' && item.browser_native === 0
   const ext = getFormatExtension(item.filename)
-  const isPlayingInMpv = isPlayingItem(item.id)
 
   const flash = (action: 'play' | 'pause' | 'seek-fwd' | 'seek-bwd') => {
     setFlashAction(action)
@@ -148,6 +150,10 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
     const video = videoRef.current
 
     if (isActive) {
+      setStreamOffset(0)
+      setCurrentTime(0)
+      setDuration(item.duration_seconds || 0)
+
       // If legacy non-native format (AVI, WMV, FLV, etc.) and MPV is available in Electron, launch direct MPV IPC playback
       if (item.browser_native === 0 && isMpvAvailable) {
         playMpv(item)
@@ -191,6 +197,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
         video.currentTime = 0
         setIsPlaying(false)
         setCurrentTime(0)
+        setStreamOffset(0)
       }
     }
 
@@ -231,9 +238,14 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
   const handleVideoTimeUpdate = () => {
     const video = videoRef.current
     if (!video || isScrubbingRef.current) return
-    setCurrentTime(video.currentTime)
-    if (video.duration && !isNaN(video.duration)) {
-      setDuration(video.duration)
+    if (isLegacy) {
+      const eff = Math.min(duration > 0 ? duration : Infinity, streamOffset + (video.currentTime || 0))
+      setCurrentTime(eff)
+    } else {
+      setCurrentTime(video.currentTime)
+      if (video.duration && !isNaN(video.duration)) {
+        setDuration(video.duration)
+      }
     }
   }
 
@@ -261,16 +273,25 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
   const handleSeek = useCallback(
     (deltaSeconds: number) => {
       resetHideTimer()
-      const newTime = Math.max(0, Math.min(duration, currentTime + deltaSeconds))
+      const maxDur = duration > 0 ? duration : (videoRef.current?.duration || 0)
+      const baseTime = isScrubbingRef.current
+        ? (scrubPercent / 100) * (duration || 1)
+        : isLegacy
+        ? streamOffset + (videoRef.current?.currentTime || 0)
+        : (videoRef.current?.currentTime || currentTime)
+      const newTime = Math.max(0, maxDur > 0 ? Math.min(maxDur, baseTime + deltaSeconds) : Math.max(0, baseTime + deltaSeconds))
       if (isPlayingInMpv) {
         seekMpv(deltaSeconds)
+      } else if (isLegacy) {
+        setStreamOffset(newTime)
+        setCurrentTime(newTime)
       } else if (videoRef.current) {
         videoRef.current.currentTime = newTime
+        setCurrentTime(newTime)
       }
-      setCurrentTime(newTime)
       flash(deltaSeconds > 0 ? 'seek-fwd' : 'seek-bwd')
     },
-    [isPlayingInMpv, seekMpv, duration, currentTime, resetHideTimer]
+    [isPlayingInMpv, seekMpv, duration, currentTime, resetHideTimer, isLegacy, streamOffset, scrubPercent]
   )
 
   // Fluid, lag-free scrubbing handlers with requestAnimationFrame throttling
@@ -288,10 +309,13 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
 
       scrubRafRef.current = requestAnimationFrame(() => {
         const now = Date.now()
-        if (now - lastSeekTimeRef.current > 50) {
+        if (now - lastSeekTimeRef.current > (isLegacy ? 120 : 50)) {
           lastSeekTimeRef.current = now
           if (isPlayingInMpv) {
             goToPositionMpv(targetTime)
+          } else if (isLegacy) {
+            setStreamOffset(targetTime)
+            setCurrentTime(targetTime)
           } else if (videoRef.current) {
             const v = videoRef.current as any
             if (typeof v.fastSeek === 'function') {
@@ -303,7 +327,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
         }
       })
     },
-    [isPlayingInMpv, goToPositionMpv, duration, resetHideTimer]
+    [isPlayingInMpv, goToPositionMpv, duration, resetHideTimer, isLegacy]
   )
 
   const handleScrubCommit = useCallback(
@@ -316,12 +340,15 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
       const targetTime = (pct / 100) * (duration || 0)
       if (isPlayingInMpv) {
         goToPositionMpv(targetTime)
+      } else if (isLegacy) {
+        setStreamOffset(targetTime)
+        setCurrentTime(targetTime)
       } else if (videoRef.current) {
         videoRef.current.currentTime = targetTime
+        setCurrentTime(targetTime)
       }
-      setCurrentTime(targetTime)
     },
-    [isPlayingInMpv, goToPositionMpv, duration, resetHideTimer]
+    [isPlayingInMpv, goToPositionMpv, duration, resetHideTimer, isLegacy]
   )
 
   const handleScrubberMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -397,7 +424,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
     }
 
     if (item.media_type === 'video') {
-      if (isLegacyFormat && !isPlayingInMpv) {
+      if (isLegacy && !isPlayingInMpv && isMpvAvailable) {
         handlePlayWithMpv()
       } else {
         togglePlayPause()
@@ -460,16 +487,23 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
             <video
               ref={videoRef}
               className="reel-media-video"
-              src={streamUrl(item.id)}
+              src={isLegacy && streamOffset > 0 ? `${streamUrl(item.id)}?t=${streamOffset}` : streamUrl(item.id)}
               muted={muted}
               autoPlay={isActive}
               loop
               playsInline
               preload={isActive ? 'auto' : 'metadata'}
               onTimeUpdate={handleVideoTimeUpdate}
+              onLoadedData={() => {
+                if (isActive && videoRef.current && videoRef.current.paused) {
+                  videoRef.current.play().catch(() => {})
+                }
+              }}
               onLoadedMetadata={() => {
-                if (videoRef.current?.duration) {
+                if (videoRef.current?.duration && !isLegacy) {
                   setDuration(videoRef.current.duration)
+                } else if (item.duration_seconds && item.duration_seconds > 0) {
+                  setDuration(item.duration_seconds)
                 }
               }}
               onError={() => {

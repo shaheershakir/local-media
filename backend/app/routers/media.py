@@ -300,14 +300,30 @@ def serve_full_image(item_id: int):
 # ── Video streaming with Range support & Live Transcode ────────────────────
 
 def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
-    """Parse 'bytes=start-end' Range header. Returns (start, end) byte offsets."""
-    match = re.match(r"bytes=(\d*)-(\d*)", range_header)
+    """
+    Parse 'bytes=start-end', 'bytes=start-', or 'bytes=-suffix' Range header
+    according to RFC 7233 / RFC 9110. Returns (start, end) byte offsets.
+    """
+    match = re.match(r"bytes=(\d*)-(\d*)", range_header.strip())
     if not match:
-        return 0, file_size - 1
+        return 0, max(0, file_size - 1)
     start_str, end_str = match.group(1), match.group(2)
-    start = int(start_str) if start_str else 0
-    end = int(end_str) if end_str else file_size - 1
-    end = min(end, file_size - 1)
+    if start_str and end_str:
+        start = int(start_str)
+        end = min(int(end_str), file_size - 1)
+    elif start_str:
+        start = int(start_str)
+        end = file_size - 1
+    elif end_str:
+        suffix_len = int(end_str)
+        start = max(0, file_size - suffix_len)
+        end = file_size - 1
+    else:
+        start = 0
+        end = file_size - 1
+
+    start = max(0, min(start, file_size - 1)) if file_size > 0 else 0
+    end = max(start, min(end, file_size - 1)) if file_size > 0 else 0
     return start, end
 
 
@@ -331,7 +347,7 @@ def _ffmpeg_pipe_generator(
     """
     Stream transcoded output directly from ffmpeg stdout using fragmented MP4.
     Delivers instant playback (< 200ms) for legacy files like AVI, WMV, FLV, MPG.
-    Seeking restarts ffmpeg from the keyframe near seek_seconds.
+    Seeking restarts ffmpeg from the requested timestamp near seek_seconds.
     """
     cmd = [
         "ffmpeg",
@@ -339,7 +355,7 @@ def _ffmpeg_pipe_generator(
         "-err_detect", "ignore_err",
     ]
     if seek_seconds > 0:
-        cmd.extend(["-ss", str(seek_seconds)])
+        cmd.extend(["-ss", f"{seek_seconds:.3f}"])
 
     cmd.extend([
         "-i", file_path,
@@ -407,7 +423,7 @@ def _to_seek_seconds(val: Any) -> Optional[float]:
         return None
     try:
         f = float(val)
-        return f if f > 0 else None
+        return max(0.0, f)
     except (ValueError, TypeError):
         return None
 
@@ -453,9 +469,10 @@ def stream_video(
         return _serve_file_with_range(str(file_path), request, content_type)
 
     # 3. For legacy non-browser-native files (AVI, WMV, FLV, MPG, etc.):
-    # Delivers instant zero-latency fragmented MP4 stream without forced background disk transcoding
+    # Trigger background transcoding to disk cache so subsequent seeks & plays use native Range
+    queue_background_transcode(item_id, str(file_path))
 
-    # Determine seek offset from query parameters (?t=10 or ?seek=10) or Range header
+    # Determine seek offset from query parameters (?t=10 or ?seek=10)
     seek_offset = 0.0
     t_val = _to_seek_seconds(t)
     seek_val = _to_seek_seconds(seek)
@@ -463,13 +480,10 @@ def stream_video(
         seek_offset = t_val
     elif seek_val is not None:
         seek_offset = seek_val
-    else:
-        range_header = request.headers.get("range")
-        if range_header and row["duration_seconds"]:
-            file_size = os.path.getsize(str(file_path))
-            start_byte, _ = _parse_range_header(range_header, file_size)
-            if start_byte > 0 and file_size > 0:
-                seek_offset = min(row["duration_seconds"], (start_byte / file_size) * row["duration_seconds"])
+
+    duration = row["duration_seconds"]
+    if duration and duration > 0:
+        seek_offset = min(seek_offset, float(duration))
 
     # Stream immediately via fragmented MP4 pipe for instant playback
     return StreamingResponse(
@@ -479,6 +493,7 @@ def stream_video(
             "Cache-Control": "no-cache, no-store",
             "Accept-Ranges": "none",
             "X-Playback-Mode": "live-transcode",
+            "X-Seek-Offset": str(seek_offset),
         },
     )
 

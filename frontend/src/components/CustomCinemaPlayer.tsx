@@ -58,7 +58,9 @@ export function CustomCinemaPlayer({
     isPlayingItem,
   } = useMpv()
 
+  const isLegacy = item.browser_native === 0
   const [isPlaying, setIsPlaying] = useState(true)
+  const [streamOffset, setStreamOffset] = useState<number>(initialTime > 0 ? initialTime : 0)
   const [currentTime, setCurrentTime] = useState(initialTime)
   const [duration, setDuration] = useState(item.duration_seconds || 0)
   const [isScrubbing, setIsScrubbing] = useState(false)
@@ -115,6 +117,11 @@ export function CustomCinemaPlayer({
     setRetryCount(0)
 
     const startPlayback = async () => {
+      const startTime = initialTime > 0 ? initialTime : 0
+      setStreamOffset(startTime)
+      setCurrentTime(startTime)
+      setDuration(item.duration_seconds || 0)
+
       // Attempt MPV launch first
       if (isMpvAvailable) {
         try {
@@ -129,8 +136,8 @@ export function CustomCinemaPlayer({
 
       // In-window HTML5 player fallback with full Range stream
       if (videoRef.current && !cancelled) {
-        if (initialTime > 0) {
-          videoRef.current.currentTime = initialTime
+        if (!isLegacy && startTime > 0) {
+          videoRef.current.currentTime = startTime
         }
         videoRef.current.play().catch(() => {
           // Fallback to muted playback if autoplay blocked
@@ -148,7 +155,7 @@ export function CustomCinemaPlayer({
     return () => {
       cancelled = true
     }
-  }, [item.id, isMpvAvailable, playMpv, initialTime])
+  }, [item.id, isMpvAvailable, playMpv, initialTime, isLegacy])
 
   // Sync MPV state when active
   useEffect(() => {
@@ -215,16 +222,25 @@ export function CustomCinemaPlayer({
   const handleSeek = useCallback(
     (deltaSeconds: number) => {
       resetHideTimer()
-      const newTime = Math.max(0, Math.min(duration, currentTime + deltaSeconds))
+      const maxDur = duration > 0 ? duration : (videoRef.current?.duration || 0)
+      const baseTime = isScrubbingRef.current
+        ? (scrubPercent / 100) * (duration || 1)
+        : isLegacy
+        ? streamOffset + (videoRef.current?.currentTime || 0)
+        : (videoRef.current?.currentTime || currentTime)
+      const newTime = Math.max(0, maxDur > 0 ? Math.min(maxDur, baseTime + deltaSeconds) : Math.max(0, baseTime + deltaSeconds))
       if (isPoweredByMpv) {
         seekMpv(deltaSeconds)
+      } else if (isLegacy) {
+        setStreamOffset(newTime)
+        setCurrentTime(newTime)
       } else if (videoRef.current) {
         videoRef.current.currentTime = newTime
+        setCurrentTime(newTime)
       }
-      setCurrentTime(newTime)
       flash(deltaSeconds > 0 ? 'seek-fwd' : 'seek-bwd')
     },
-    [isPoweredByMpv, seekMpv, duration, currentTime, resetHideTimer]
+    [isPoweredByMpv, seekMpv, duration, currentTime, resetHideTimer, isLegacy, streamOffset, scrubPercent]
   )
 
   // Fluid, lag-free scrubbing handlers with requestAnimationFrame throttling
@@ -241,10 +257,13 @@ export function CustomCinemaPlayer({
 
       scrubRafRef.current = requestAnimationFrame(() => {
         const now = Date.now()
-        if (now - lastSeekTimeRef.current > 40) {
+        if (now - lastSeekTimeRef.current > (isLegacy ? 120 : 40)) {
           lastSeekTimeRef.current = now
           if (isPoweredByMpv) {
             goToPositionMpv(targetTime)
+          } else if (isLegacy) {
+            setStreamOffset(targetTime)
+            setCurrentTime(targetTime)
           } else if (videoRef.current) {
             const v = videoRef.current as any
             if (typeof v.fastSeek === 'function') {
@@ -256,7 +275,7 @@ export function CustomCinemaPlayer({
         }
       })
     },
-    [isPoweredByMpv, goToPositionMpv, duration]
+    [isPoweredByMpv, goToPositionMpv, duration, isLegacy]
   )
 
   const handleScrubCommit = useCallback(
@@ -268,12 +287,15 @@ export function CustomCinemaPlayer({
       const targetTime = (pct / 100) * (duration || 0)
       if (isPoweredByMpv) {
         goToPositionMpv(targetTime)
+      } else if (isLegacy) {
+        setStreamOffset(targetTime)
+        setCurrentTime(targetTime)
       } else if (videoRef.current) {
         videoRef.current.currentTime = targetTime
+        setCurrentTime(targetTime)
       }
-      setCurrentTime(targetTime)
     },
-    [isPoweredByMpv, goToPositionMpv, duration]
+    [isPoweredByMpv, goToPositionMpv, duration, isLegacy]
   )
 
   // Fullscreen vertical scrolling navigation (wheel & gestures)
@@ -416,12 +438,36 @@ export function CustomCinemaPlayer({
       <video
         ref={videoRef}
         className="cinema-video-surface"
-        src={!isPoweredByMpv ? `${streamUrl(item.id)}${retryCount > 0 ? `?retry=${retryCount}` : ''}` : undefined}
+        src={
+          !isPoweredByMpv
+            ? `${streamUrl(item.id)}${isLegacy && streamOffset > 0 ? `?t=${streamOffset}` : ''}${retryCount > 0 ? `${isLegacy && streamOffset > 0 ? '&' : '?'}retry=${retryCount}` : ''}`
+            : undefined
+        }
         playsInline
         onTimeUpdate={() => {
           if (!isPoweredByMpv && videoRef.current && !isScrubbingRef.current) {
-            setCurrentTime(videoRef.current.currentTime)
-            if (videoRef.current.duration) setDuration(videoRef.current.duration)
+            if (isLegacy) {
+              const eff = Math.min(duration > 0 ? duration : Infinity, streamOffset + (videoRef.current.currentTime || 0))
+              setCurrentTime(eff)
+            } else {
+              setCurrentTime(videoRef.current.currentTime)
+              if (videoRef.current.duration) setDuration(videoRef.current.duration)
+            }
+          }
+        }}
+        onLoadedData={() => {
+          if (isPlaying && videoRef.current && videoRef.current.paused) {
+            videoRef.current.play().catch(() => {})
+          }
+        }}
+        onLoadedMetadata={() => {
+          if (videoRef.current) {
+            if (!isLegacy && videoRef.current.duration) {
+              setDuration(videoRef.current.duration)
+            } else if (item.duration_seconds && item.duration_seconds > 0) {
+              setDuration(item.duration_seconds)
+            }
+            setVideoError(null)
           }
         }}
         onError={() => {

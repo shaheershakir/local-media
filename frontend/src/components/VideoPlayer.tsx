@@ -32,11 +32,19 @@ export function VideoPlayer({
   const theaterRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
+  const isLegacy = item.browser_native === 0
   const [isPlaying, setIsPlaying] = useState(true)
-  const [currentTime, setCurrentTime] = useState(initialTime)
+  const [streamOffset, setStreamOffset] = useState<number>(
+    initialTime > 0 ? initialTime : (item.duration_watched_seconds || 0)
+  )
+  const [currentTime, setCurrentTime] = useState(
+    initialTime > 0 ? initialTime : (item.duration_watched_seconds || 0)
+  )
   const [duration, setDuration] = useState(item.duration_seconds || 0)
   const [isScrubbing, setIsScrubbing] = useState(false)
-  const [scrubTime, setScrubTime] = useState(initialTime)
+  const [scrubTime, setScrubTime] = useState(
+    initialTime > 0 ? initialTime : (item.duration_watched_seconds || 0)
+  )
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const [hudToast, setHudToast] = useState<{ text: string; direction: 'next' | 'prev' | 'info' } | null>(null)
@@ -145,6 +153,7 @@ export function VideoPlayer({
 
     const startPlayback = async () => {
       const startTime = initialTime > 0 ? initialTime : item.duration_watched_seconds || 0
+      setStreamOffset(startTime)
       setCurrentTime(startTime)
       setScrubTime(startTime)
       setDuration(item.duration_seconds || 0)
@@ -171,7 +180,7 @@ export function VideoPlayer({
       if (video && !cancelled) {
         video.volume = volume / 100
         video.muted = muted
-        if (startTime > 0) {
+        if (!isLegacy && startTime > 0) {
           video.currentTime = startTime
         }
         video
@@ -194,7 +203,7 @@ export function VideoPlayer({
       cancelled = true
       if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
     }
-  }, [item.id, item.browser_native, isMpvAvailable, playMpv, initialTime, volume, muted, showHud])
+  }, [item.id, item.browser_native, isLegacy, isMpvAvailable, playMpv, initialTime, volume, muted, showHud])
 
   // 3. Sync volume and muted with AudioPreferenceProvider
   useEffect(() => {
@@ -228,6 +237,13 @@ export function VideoPlayer({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
 
+  const effectiveDuration =
+    mpvState.duration && mpvState.duration > 1
+      ? mpvState.duration
+      : item.duration_seconds && item.duration_seconds > 0
+      ? item.duration_seconds
+      : duration
+
   // Playback Control Handlers
   const togglePlay = useCallback(() => {
     if (isPoweredByMpv) {
@@ -252,13 +268,24 @@ export function VideoPlayer({
       }
       const video = videoRef.current
       if (!video) return
-      const maxDur = duration > 0 ? duration : (video.duration || 0)
-      const baseTime = isScrubbingRef.current ? scrubTime : (video.currentTime || currentTime)
-      const targetTime = Math.max(0, maxDur > 0 ? Math.min(maxDur, baseTime + secondsDelta) : baseTime + secondsDelta)
-      video.currentTime = targetTime
-      setCurrentTime(targetTime)
+      const maxDur = effectiveDuration > 0 ? effectiveDuration : (video.duration || 0)
+      const baseTime = isScrubbingRef.current
+        ? scrubTime
+        : isLegacy
+        ? streamOffset + (video.currentTime || 0)
+        : (video.currentTime || currentTime)
+      const targetTime = Math.max(0, maxDur > 0 ? Math.min(maxDur, baseTime + secondsDelta) : Math.max(0, baseTime + secondsDelta))
+
+      if (isLegacy) {
+        setStreamOffset(targetTime)
+        setCurrentTime(targetTime)
+        setScrubTime(targetTime)
+      } else {
+        video.currentTime = targetTime
+        setCurrentTime(targetTime)
+      }
     },
-    [isPoweredByMpv, seekMpv, duration, scrubTime, currentTime]
+    [isPoweredByMpv, seekMpv, effectiveDuration, scrubTime, currentTime, isLegacy, streamOffset]
   )
 
   // Fluid, lag-free scrubbing handlers with requestAnimationFrame throttling
@@ -274,10 +301,13 @@ export function VideoPlayer({
 
       scrubRafRef.current = requestAnimationFrame(() => {
         const now = Date.now()
-        if (now - lastSeekTimeRef.current > 40) {
+        if (now - lastSeekTimeRef.current > (isLegacy ? 120 : 40)) {
           lastSeekTimeRef.current = now
           if (isPoweredByMpv) {
             goToPositionMpv(targetTime)
+          } else if (isLegacy) {
+            setStreamOffset(targetTime)
+            setCurrentTime(targetTime)
           } else if (videoRef.current) {
             const v = videoRef.current as any
             if (typeof v.fastSeek === 'function') {
@@ -289,7 +319,7 @@ export function VideoPlayer({
         }
       })
     },
-    [isPoweredByMpv, goToPositionMpv]
+    [isPoweredByMpv, goToPositionMpv, isLegacy]
   )
 
   const handleScrubCommit = useCallback(
@@ -300,12 +330,15 @@ export function VideoPlayer({
 
       if (isPoweredByMpv) {
         goToPositionMpv(targetTime)
+      } else if (isLegacy) {
+        setStreamOffset(targetTime)
+        setCurrentTime(targetTime)
       } else if (videoRef.current) {
         videoRef.current.currentTime = targetTime
+        setCurrentTime(targetTime)
       }
-      setCurrentTime(targetTime)
     },
-    [isPoweredByMpv, goToPositionMpv]
+    [isPoweredByMpv, goToPositionMpv, isLegacy]
   )
 
   const toggleFullscreen = useCallback(async () => {
@@ -462,12 +495,7 @@ export function VideoPlayer({
     }
   }
 
-  const effectiveDuration =
-    mpvState.duration && mpvState.duration > 1
-      ? mpvState.duration
-      : item.duration_seconds && item.duration_seconds > 0
-      ? item.duration_seconds
-      : duration
+  // End of player handlers
 
   return (
     <div
@@ -481,16 +509,37 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         className="player-video-element"
-        src={!isPoweredByMpv ? `${streamUrl(item.id)}${retryCount > 0 ? `?retry=${retryCount}` : ''}` : undefined}
+        src={
+          !isPoweredByMpv
+            ? `${streamUrl(item.id)}${isLegacy && streamOffset > 0 ? `?t=${streamOffset}` : ''}${retryCount > 0 ? `${isLegacy && streamOffset > 0 ? '&' : '?'}retry=${retryCount}` : ''}`
+            : undefined
+        }
         playsInline
         onTimeUpdate={() => {
-          if (videoRef.current) {
-            setCurrentTime(videoRef.current.currentTime)
+          if (videoRef.current && !isScrubbingRef.current) {
+            if (isLegacy) {
+              const eff = Math.min(
+                effectiveDuration > 0 ? effectiveDuration : Infinity,
+                streamOffset + (videoRef.current.currentTime || 0)
+              )
+              setCurrentTime(eff)
+            } else {
+              setCurrentTime(videoRef.current.currentTime)
+            }
+          }
+        }}
+        onLoadedData={() => {
+          if (isPlaying && videoRef.current && videoRef.current.paused) {
+            videoRef.current.play().catch(() => {})
           }
         }}
         onLoadedMetadata={() => {
           if (videoRef.current) {
-            setDuration(videoRef.current.duration || item.duration_seconds || 0)
+            if (!isLegacy) {
+              setDuration(videoRef.current.duration || item.duration_seconds || 0)
+            } else if (item.duration_seconds && item.duration_seconds > 0) {
+              setDuration(item.duration_seconds)
+            }
             setVideoError(null)
           }
         }}
