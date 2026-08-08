@@ -398,7 +398,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
   return (
     <div
       ref={cardRef}
-      className={`reel-card ${orientation}${showControls ? ' show-controls' : ' hide-controls'}`}
+      className={`reel-card ${orientation}${showControls ? ' show-controls' : ' hide-controls'}${isFullscreen ? ' is-fullscreen' : ''}`}
       onClick={handleCardClick}
       onMouseMove={resetHideTimer}
       onMouseEnter={resetHideTimer}
