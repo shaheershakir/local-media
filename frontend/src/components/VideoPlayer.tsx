@@ -38,9 +38,11 @@ export function VideoPlayer({
   const [isScrubbing, setIsScrubbing] = useState(false)
   const [scrubTime, setScrubTime] = useState(initialTime)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showControls, setShowControls] = useState(true)
   const [hudToast, setHudToast] = useState<{ text: string; direction: 'next' | 'prev' | 'info' } | null>(null)
 
   const hudTimer = useRef<number | null>(null)
+  const hideControlsTimer = useRef<number | null>(null)
   const wheelLockRef = useRef<number>(0)
   const wheelAccumRef = useRef<number>(0)
   const wheelTimerRef = useRef<number | null>(null)
@@ -48,6 +50,24 @@ export function VideoPlayer({
   const isScrubbingRef = useRef<boolean>(false)
   const scrubRafRef = useRef<number | null>(null)
   const lastSeekTimeRef = useRef<number>(0)
+
+  // Auto-hide controls timer during playback
+  const resetHideTimer = useCallback(() => {
+    setShowControls(true)
+    if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current)
+    if (isPlaying) {
+      hideControlsTimer.current = window.setTimeout(() => {
+        setShowControls(false)
+      }, 3000)
+    }
+  }, [isPlaying])
+
+  useEffect(() => {
+    resetHideTimer()
+    return () => {
+      if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current)
+    }
+  }, [resetHideTimer])
 
   const { muted, toggleMuted, volume, setVolume } = useAudioPreference()
   const {
@@ -301,17 +321,13 @@ export function VideoPlayer({
 
     const handleWheel = (e: WheelEvent) => {
       const inFullscreen = Boolean(document.fullscreenElement) || isFullscreen
-      // When in fullscreen (or scrolling over the theater container with multiple siblings)
-      if (!inFullscreen && totalVideos <= 1) return
+      // Video navigation scroll ONLY works in fullscreen mode
+      if (!inFullscreen) return
 
-      // In fullscreen, intercept vertical scroll gestures
-      if (inFullscreen) {
-        e.preventDefault()
-      }
+      e.preventDefault()
 
       const now = Date.now()
       if (now - wheelLockRef.current < 600) {
-        // Cooldown between video transitions
         return
       }
 
@@ -322,14 +338,11 @@ export function VideoPlayer({
         wheelAccumRef.current = 0
       }, 250)
 
-      // Scrolling down (deltaY > 0) -> Next Sibling Video
       if (wheelAccumRef.current >= 35) {
         wheelLockRef.current = now
         wheelAccumRef.current = 0
         handleNext()
-      }
-      // Scrolling up (deltaY < 0) -> Previous Sibling Video
-      else if (wheelAccumRef.current <= -35) {
+      } else if (wheelAccumRef.current <= -35) {
         wheelLockRef.current = now
         wheelAccumRef.current = 0
         handlePrev()
@@ -341,23 +354,25 @@ export function VideoPlayer({
       el.removeEventListener('wheel', handleWheel)
       if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
     }
-  }, [isFullscreen, totalVideos, handleNext, handlePrev])
+  }, [isFullscreen, handleNext, handlePrev])
 
   // 7. Touch swipe vertical navigation
   const handleTouchStart = (e: React.TouchEvent) => {
+    resetHideTimer()
     if (e.touches.length === 1) {
       touchStartY.current = e.touches[0].clientY
     }
   }
 
   const handleTouchEnd = (e: React.TouchEvent) => {
+    resetHideTimer()
     if (touchStartY.current === null) return
     const touchEndY = e.changedTouches[0].clientY
-    const deltaY = touchStartY.current - touchEndY // swipe up = positive (next), swipe down = negative (prev)
+    const deltaY = touchStartY.current - touchEndY
     touchStartY.current = null
 
     const inFullscreen = Boolean(document.fullscreenElement) || isFullscreen
-    if (!inFullscreen && totalVideos <= 1) return
+    if (!inFullscreen) return
 
     if (deltaY > 45) {
       handleNext()
@@ -369,13 +384,16 @@ export function VideoPlayer({
   // 8. Keyboard Shortcuts
   // - Space: Play/Pause
   // - ArrowLeft / ArrowRight: Seek -5s / +5s
-  // - ArrowDown / PageDown / N / Shift+N / J / ]: Next Sibling Video
-  // - ArrowUp / PageUp / P / Shift+P / K / [: Previous Sibling Video
+  // - Fullscreen ONLY: ArrowDown / PageDown / N / J / ] (Next Sibling Video)
+  // - Fullscreen ONLY: ArrowUp / PageUp / P / K / [ (Previous Sibling Video)
   // - F: Fullscreen
   // - M: Mute
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      resetHideTimer()
+
+      const inFullscreen = Boolean(document.fullscreenElement) || isFullscreen
 
       if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault()
@@ -395,8 +413,10 @@ export function VideoPlayer({
         e.key === 'J' ||
         e.key === ']'
       ) {
-        e.preventDefault()
-        handleNext()
+        if (inFullscreen) {
+          e.preventDefault()
+          handleNext()
+        }
       } else if (
         e.key === 'ArrowUp' ||
         e.key === 'PageUp' ||
@@ -406,8 +426,10 @@ export function VideoPlayer({
         e.key === 'K' ||
         e.key === '['
       ) {
-        e.preventDefault()
-        handlePrev()
+        if (inFullscreen) {
+          e.preventDefault()
+          handlePrev()
+        }
       } else if (e.key === 'f' || e.key === 'F') {
         e.preventDefault()
         toggleFullscreen()
@@ -419,7 +441,7 @@ export function VideoPlayer({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [togglePlay, handleSeek, handleNext, handlePrev, toggleFullscreen, toggleMuted])
+  }, [togglePlay, handleSeek, handleNext, handlePrev, toggleFullscreen, toggleMuted, isFullscreen, resetHideTimer])
 
   // Handle video playback ended
   const handleVideoEnded = () => {
@@ -435,7 +457,9 @@ export function VideoPlayer({
   return (
     <div
       ref={theaterRef}
-      className={`player-theater-wrapper ${className}${isFullscreen ? ' is-fullscreen' : ''}`}
+      className={`player-theater-wrapper ${className}${isFullscreen ? ' is-fullscreen' : ''}${showControls ? ' show-controls' : ' hide-controls'}`}
+      onMouseMove={resetHideTimer}
+      onMouseEnter={resetHideTimer}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >

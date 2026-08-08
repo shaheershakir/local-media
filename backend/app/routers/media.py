@@ -334,6 +334,9 @@ def _ffmpeg_pipe_generator(
         "-c:v", "libx264",
         "-preset", "ultrafast",  # lowest latency for real-time streaming
         "-crf", "26",
+        "-g", "30",
+        "-keyint_min", "30",
+        "-sc_threshold", "0",
         "-pix_fmt", "yuv420p",
         "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:a", "aac",
@@ -341,7 +344,8 @@ def _ffmpeg_pipe_generator(
         "-ar", "44100",
         "-ac", "2",
         "-max_muxing_queue_size", "1024",
-        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof+global_sps_pps",
+        "-frag_duration", "500000",
         "-f", "mp4",
         "pipe:1",
     ])

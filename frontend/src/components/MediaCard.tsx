@@ -51,6 +51,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
   const { muted, setMuted, toggleMuted, volume, setVolume } = useAudioPreference()
   const {
     mpvState,
+    isAvailable: isMpvAvailable,
     play: playMpv,
     seek: seekMpv,
     goToPosition: goToPositionMpv,
@@ -147,6 +148,12 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
     const video = videoRef.current
 
     if (isActive) {
+      // If legacy non-native format (AVI, WMV, FLV, etc.) and MPV is available in Electron, launch direct MPV IPC playback
+      if (item.browser_native === 0 && isMpvAvailable) {
+        playMpv(item)
+        return
+      }
+
       if (video) {
         video.muted = muted
         video.volume = volume / 100
@@ -198,7 +205,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
         video.currentTime = 0
       }
     }
-  }, [isActive, item, muted, volume])
+  }, [isActive, item, muted, volume, isMpvAvailable, playMpv])
 
   // Sync audio preferences to HTML5 video element
   useEffect(() => {

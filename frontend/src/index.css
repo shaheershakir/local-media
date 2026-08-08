@@ -574,7 +574,7 @@ body::before {
 .reels-wrapper {
   position: relative;
   width: 100%;
-  height: calc(100dvh - var(--nav-height));
+  height: calc(100dvh - var(--top-nav-height, 44px) - var(--nav-height, 60px));
   overflow: hidden;
   background: #000000;
 }
@@ -654,7 +654,7 @@ body::before {
 }
 
 .reel-card {
-  height: calc(100dvh - var(--nav-height));
+  height: calc(100dvh - var(--top-nav-height, 44px) - var(--nav-height, 60px));
   width: 100%;
   scroll-snap-align: start;
   scroll-snap-stop: always;
@@ -668,7 +668,8 @@ body::before {
   cursor: pointer;
 }
 
-.reels-container:fullscreen .reel-card {
+.reels-container:fullscreen .reel-card,
+.reel-card.is-fullscreen {
   height: 100dvh;
 }
 
@@ -856,8 +857,7 @@ body::before {
   pointer-events: none;
 }
 
-/* Auto-hide the side actions rail in fullscreen mode */
-.reel-card.is-fullscreen.hide-controls .reel-actions {
+.reel-card.hide-controls .reel-actions {
   opacity: 0;
   transform: translateX(20px);
   pointer-events: none;
@@ -870,7 +870,7 @@ body::before {
   pointer-events: auto;
 }
 
-.reel-card.is-fullscreen.show-controls .reel-actions {
+.reel-card.show-controls .reel-actions {
   opacity: 1;
   transform: translateX(0);
   pointer-events: auto;
@@ -2525,7 +2525,16 @@ body::before {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  max-width: 65%;
+  max-width: 75%;
+}
+
+.reel-top-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 .cinema-title {
@@ -2537,6 +2546,9 @@ body::before {
   overflow: hidden;
   text-overflow: ellipsis;
   margin: 0;
+  max-width: 100%;
+  min-width: 0;
+  word-break: break-all;
 }
 
 .cinema-pill-row {
@@ -2614,6 +2626,8 @@ body::before {
   transition: opacity 0.3s ease, transform 0.3s ease;
   cursor: default;
 }
+
+
 
 .cinema-timeline-wrapper {
   position: relative;
@@ -3490,6 +3504,8 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .video-card-title {
@@ -3501,6 +3517,9 @@ body::before {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.2;
+  max-width: 100%;
+  min-width: 0;
+  word-break: break-all;
 }
 
 .video-card-meta {
@@ -4375,9 +4394,18 @@ body::before {
   pointer-events: auto;
 }
 
+.player-theater-wrapper.show-controls .player-controls-overlay,
+.player-theater-wrapper.show-controls .player-side-arrow-btn,
 .player-theater-wrapper:hover .player-controls-overlay,
 .player-theater-wrapper:focus-within .player-controls-overlay {
   opacity: 1;
+  pointer-events: auto;
+}
+
+.player-theater-wrapper.hide-controls .player-controls-overlay,
+.player-theater-wrapper.hide-controls .player-side-arrow-btn {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Scrubber */
@@ -4503,15 +4531,23 @@ body::before {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 .player-video-title {
   font-family: var(--font-display);
-  font-size: clamp(22px, 3vw, 32px);
+  font-size: clamp(20px, 2.5vw, 28px);
   font-weight: 500;
   color: var(--c-text-hi);
-  line-height: 1.2;
+  line-height: 1.25;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
 .player-action-buttons {
@@ -4519,6 +4555,7 @@ body::before {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .player-action-pill {

@@ -283,11 +283,9 @@ export function CustomCinemaPlayer({
 
     const handleWheel = (e: WheelEvent) => {
       const inFullscreen = Boolean(document.fullscreenElement) || isFullscreen
-      if (!inFullscreen && totalVideos <= 1) return
+      if (!inFullscreen) return
 
-      if (inFullscreen) {
-        e.preventDefault()
-      }
+      e.preventDefault()
 
       const now = Date.now()
       if (now - wheelLockRef.current < 600) return
