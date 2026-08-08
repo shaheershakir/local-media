@@ -92,8 +92,8 @@ export function useMpv() {
     await window.localfeed?.mpv?.seek(seconds)
   }, [])
 
-  const goToPosition = useCallback(async (seconds: number) => {
-    await window.localfeed?.mpv?.goToPosition(seconds)
+  const goToPosition = useCallback(async (seconds: number, exact = true) => {
+    await window.localfeed?.mpv?.goToPosition(seconds, exact)
   }, [])
 
   const setVolume = useCallback(async (volume: number) => {

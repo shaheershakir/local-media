@@ -241,10 +241,10 @@ export function CustomCinemaPlayer({
 
       scrubRafRef.current = requestAnimationFrame(() => {
         const now = Date.now()
-        if (now - lastSeekTimeRef.current > 50) {
+        if (now - lastSeekTimeRef.current > 40) {
           lastSeekTimeRef.current = now
           if (isPoweredByMpv) {
-            goToPositionMpv(targetTime)
+            goToPositionMpv(targetTime, false)
           } else if (videoRef.current) {
             const v = videoRef.current as any
             if (typeof v.fastSeek === 'function') {
@@ -267,7 +267,7 @@ export function CustomCinemaPlayer({
 
       const targetTime = (pct / 100) * (duration || 0)
       if (isPoweredByMpv) {
-        goToPositionMpv(targetTime)
+        goToPositionMpv(targetTime, true)
       } else if (videoRef.current) {
         videoRef.current.currentTime = targetTime
       }

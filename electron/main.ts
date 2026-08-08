@@ -66,8 +66,12 @@ function registerNativeApis(): void {
     await mpvController.seek(seconds)
     return true
   })
-  ipcMain.handle('mpv:go-to-position', async (_event, seconds: number) => {
-    await mpvController.goToPosition(seconds)
+  ipcMain.handle('mpv:go-to-position', async (_event, payload: number | { seconds: number; exact?: boolean }) => {
+    if (typeof payload === 'number') {
+      await mpvController.goToPosition(payload, true)
+    } else if (payload && typeof payload.seconds === 'number') {
+      await mpvController.goToPosition(payload.seconds, payload.exact ?? true)
+    }
     return true
   })
   ipcMain.handle('mpv:set-volume', async (_event, volume: number) => {

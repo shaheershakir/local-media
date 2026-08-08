@@ -220,6 +220,12 @@ export class MPVController {
 
       await mpv.start()
 
+      // Explicitly observe duration and length for accurate timeline calculation
+      try {
+        mpv.socket.command('observe_property', [1, 'duration'])
+        mpv.socket.command('observe_property', [2, 'length'])
+      } catch {}
+
       this.mpvInstance = mpv
       this.currentStatus.running = true
       this.currentStatus.available = true
@@ -235,8 +241,14 @@ export class MPVController {
 
   private bindMpvEvents(mpv: any): void {
     mpv.on('statuschange', (status: any) => {
-      if (status['time-pos'] !== undefined) this.currentStatus.currentTime = Number(status['time-pos']) || 0
-      if (status.duration !== undefined) this.currentStatus.duration = Number(status.duration) || 0
+      if (status['time-pos'] !== undefined && status['time-pos'] !== null) {
+        this.currentStatus.currentTime = Number(status['time-pos']) || 0
+      }
+      if (status.duration !== undefined && status.duration !== null && Number(status.duration) > 0) {
+        this.currentStatus.duration = Number(status.duration)
+      } else if (status.length !== undefined && status.length !== null && Number(status.length) > 0) {
+        this.currentStatus.duration = Number(status.length)
+      }
       if (status.pause !== undefined) this.currentStatus.paused = Boolean(status.pause)
       if (status.volume !== undefined) this.currentStatus.volume = Number(status.volume) || 100
       if (status.mute !== undefined) this.currentStatus.muted = Boolean(status.mute)
@@ -245,7 +257,10 @@ export class MPVController {
 
     mpv.on('timeposition', (seconds: number) => {
       this.currentStatus.currentTime = Number(seconds) || 0
-      this.broadcastEvent('mpv:timeposition', { currentTime: this.currentStatus.currentTime })
+      this.broadcastEvent('mpv:timeposition', {
+        currentTime: this.currentStatus.currentTime,
+        duration: this.currentStatus.duration,
+      })
     })
 
     mpv.on('paused', () => {
@@ -389,11 +404,21 @@ export class MPVController {
     }
   }
 
-  public async goToPosition(seconds: number): Promise<void> {
+  public async goToPosition(seconds: number, exact = true): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
       try {
-        await this.mpvInstance.goToPosition(seconds)
-      } catch {}
+        const clamped = Math.max(0, seconds)
+        if (exact) {
+          await this.mpvInstance.socket.command('seek', [clamped, 'absolute', 'exact'])
+        } else {
+          await this.mpvInstance.socket.command('seek', [clamped, 'absolute', 'keyframes'])
+        }
+        this.currentStatus.currentTime = clamped
+      } catch {
+        try {
+          await this.mpvInstance.goToPosition(seconds)
+        } catch {}
+      }
     }
   }
 

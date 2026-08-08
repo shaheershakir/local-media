@@ -169,9 +169,21 @@ def get_media_item(item_id: int):
             """,
             (item_id,),
         ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Media item not found")
-    item = dict(row)
+        if not row:
+            raise HTTPException(status_code=404, detail="Media item not found")
+        item = dict(row)
+
+        # If video duration is missing or 0, lazily resolve and update in DB
+        if item.get("media_type") == "video" and not item.get("duration_seconds"):
+            try:
+                from app.scanner import _fast_probe_duration
+                dur = _fast_probe_duration(Path(item["path"]))
+                if dur and dur > 0:
+                    conn.execute("UPDATE media_items SET duration_seconds = ? WHERE id = ?", (dur, item_id))
+                    item["duration_seconds"] = dur
+            except Exception:
+                pass
+
     item["folder_label"] = item.get("folder_display_name") or item.get("folder_name")
     return item
 

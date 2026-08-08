@@ -39,11 +39,11 @@ declare global {
         togglePause: () => Promise<boolean>
         stop: () => Promise<boolean>
         seek: (seconds: number) => Promise<boolean>
-        goToPosition: (seconds: number) => Promise<boolean>
+        goToPosition: (seconds: number, exact?: boolean) => Promise<boolean>
         setVolume: (volume: number) => Promise<boolean>
         toggleMute: () => Promise<boolean>
         onStatus: (callback: (status: MpvStatusData) => void) => () => void
-        onTimePosition: (callback: (timeData: { currentTime: number }) => void) => () => void
+        onTimePosition: (callback: (timeData: { currentTime: number; duration?: number }) => void) => () => void
       }
     }
   }

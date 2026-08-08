@@ -181,6 +181,52 @@ def _run_ffprobe(path: Path) -> Optional[dict]:
         return None
 
 
+def _parse_duration_value(val: Any) -> Optional[float]:
+    """Parse duration from float, int, or timestamp string (e.g. HH:MM:SS.mmm)."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val) if val > 0 else None
+    s = str(val).strip()
+    if not s or s.upper() == "N/A":
+        return None
+    try:
+        f = float(s)
+        return f if f > 0 else None
+    except ValueError:
+        pass
+    parts = s.split(":")
+    if len(parts) in (2, 3):
+        try:
+            if len(parts) == 3:
+                h, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
+                dur = h * 3600 + m * 60 + sec
+            else:
+                m, sec = float(parts[0]), float(parts[1])
+                dur = m * 60 + sec
+            return dur if dur > 0 else None
+        except ValueError:
+            pass
+    return None
+
+
+def _fast_probe_duration(path: Path) -> Optional[float]:
+    """Fallback fast duration probe via ffmpeg -i when ffprobe headers lack duration."""
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-i", str(path)],
+            capture_output=True,
+            timeout=10,
+        )
+        stderr_text = proc.stderr.decode(errors="replace")
+        match = re.search(r"Duration:\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)", stderr_text)
+        if match:
+            return _parse_duration_value(match.group(1))
+    except Exception:
+        pass
+    return None
+
+
 def _extract_video_metadata(path: Path) -> Optional[dict]:
     """Extract duration, resolution, codec, container from a video file."""
     data = _run_ffprobe(path)
@@ -204,14 +250,19 @@ def _extract_video_metadata(path: Path) -> Optional[dict]:
     height = video_stream.get("height", 0)
     codec_name = (video_stream.get("codec_name") or "").lower()
 
-    # Try to get duration from stream first, then format
-    duration = None
-    raw_dur = video_stream.get("duration") or data.get("format", {}).get("duration")
-    if raw_dur:
-        try:
-            duration = float(raw_dur)
-        except (ValueError, TypeError):
-            pass
+    # Try to get duration from stream, format, tags, or fast probe
+    duration = (
+        _parse_duration_value(video_stream.get("duration"))
+        or _parse_duration_value(data.get("format", {}).get("duration"))
+        or _parse_duration_value(video_stream.get("tags", {}).get("DURATION"))
+        or _parse_duration_value(video_stream.get("tags", {}).get("DURATION-eng"))
+        or _parse_duration_value(video_stream.get("tags", {}).get("duration"))
+        or _parse_duration_value(data.get("format", {}).get("tags", {}).get("DURATION"))
+        or _parse_duration_value(data.get("format", {}).get("tags", {}).get("DURATION-eng"))
+        or (audio_stream and _parse_duration_value(audio_stream.get("duration")))
+    )
+    if duration is None or duration <= 0:
+        duration = _fast_probe_duration(path)
 
     # Handle rotation (common in phone videos)
     rotation = 0

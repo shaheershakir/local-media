@@ -20,7 +20,8 @@ contextBridge.exposeInMainWorld('localfeed', {
     togglePause: (): Promise<boolean> => ipcRenderer.invoke('mpv:toggle-pause'),
     stop: (): Promise<boolean> => ipcRenderer.invoke('mpv:stop'),
     seek: (seconds: number): Promise<boolean> => ipcRenderer.invoke('mpv:seek', seconds),
-    goToPosition: (seconds: number): Promise<boolean> => ipcRenderer.invoke('mpv:go-to-position', seconds),
+    goToPosition: (seconds: number, exact = true): Promise<boolean> =>
+      ipcRenderer.invoke('mpv:go-to-position', { seconds, exact }),
     setVolume: (volume: number): Promise<boolean> => ipcRenderer.invoke('mpv:set-volume', volume),
     toggleMute: (): Promise<boolean> => ipcRenderer.invoke('mpv:toggle-mute'),
     onStatus: (callback: (status: any) => void): (() => void) => {

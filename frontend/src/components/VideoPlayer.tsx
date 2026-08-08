@@ -248,14 +248,16 @@ export function VideoPlayer({
       }
       const video = videoRef.current
       if (!video) return
-      const targetTime = Math.max(0, Math.min(video.duration || duration, (isScrubbingRef.current ? scrubTime : video.currentTime) + secondsDelta))
+      const maxDur = duration > 0 ? duration : (video.duration || 0)
+      const baseTime = isScrubbingRef.current ? scrubTime : (video.currentTime || currentTime)
+      const targetTime = Math.max(0, maxDur > 0 ? Math.min(maxDur, baseTime + secondsDelta) : baseTime + secondsDelta)
       video.currentTime = targetTime
       setCurrentTime(targetTime)
     },
-    [isPoweredByMpv, seekMpv, duration, scrubTime]
+    [isPoweredByMpv, seekMpv, duration, scrubTime, currentTime]
   )
 
-  // Fluid, lag-free scrubbing handlers with requestAnimationFrame throttling
+  // Fluid, lag-free scrubbing handlers with keyframe preview and exact frame release
   const handleScrubStart = useCallback(() => {
     isScrubbingRef.current = true
     setIsScrubbing(true)
@@ -268,11 +270,11 @@ export function VideoPlayer({
 
       scrubRafRef.current = requestAnimationFrame(() => {
         const now = Date.now()
-        // Throttle video pipeline seeks during drag to avoid network/decoder choking
-        if (now - lastSeekTimeRef.current > 50) {
+        // Fast keyframe seek during dragging for lag-free 60fps slider motion
+        if (now - lastSeekTimeRef.current > 40) {
           lastSeekTimeRef.current = now
           if (isPoweredByMpv) {
-            goToPositionMpv(targetTime)
+            goToPositionMpv(targetTime, false)
           } else if (videoRef.current) {
             const v = videoRef.current as any
             if (typeof v.fastSeek === 'function') {
@@ -293,8 +295,9 @@ export function VideoPlayer({
       setIsScrubbing(false)
       if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
 
+      // Exact seek landing on release
       if (isPoweredByMpv) {
-        goToPositionMpv(targetTime)
+        goToPositionMpv(targetTime, true)
       } else if (videoRef.current) {
         videoRef.current.currentTime = targetTime
       }
@@ -610,9 +613,9 @@ export function VideoPlayer({
             type="range"
             className="player-scrubber-slider"
             min={0}
-            max={duration || 100}
+            max={duration > 0 ? duration : (currentTime > 0 ? currentTime * 1.2 : 100)}
             step={0.1}
-            value={isScrubbing ? scrubTime : currentTime}
+            value={isScrubbing ? scrubTime : Math.min(currentTime, duration > 0 ? duration : Math.max(100, currentTime))}
             onPointerDown={handleScrubStart}
             onMouseDown={handleScrubStart}
             onTouchStart={handleScrubStart}
@@ -739,9 +742,9 @@ export function VideoPlayer({
 
             {/* Time Counter */}
             <div className="player-time-display">
-              <span className="player-time-current">{formatDuration(currentTime)}</span>
+              <span className="player-time-current">{formatDuration(isScrubbing ? scrubTime : currentTime)}</span>
               <span className="player-time-divider">/</span>
-              <span className="player-time-duration">{formatDuration(duration)}</span>
+              <span className="player-time-duration">{duration > 0 ? formatDuration(duration) : (currentTime > 0 ? formatDuration(currentTime) : '--:--')}</span>
             </div>
 
             {/* Sibling Badge Counter in Bar */}
