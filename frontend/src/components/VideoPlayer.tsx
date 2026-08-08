@@ -62,7 +62,17 @@ export function VideoPlayer({ item, initialTime = 0, onEnded, className = '' }: 
         if (startTime > 0) {
           video.currentTime = startTime
         }
-        video.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false))
+        video
+          .play()
+          .then(() => setIsPlaying(true))
+          .catch(() => {
+            // If browser blocked unmuted autoplay, retry with muted=true
+            video.muted = true
+            video
+              .play()
+              .then(() => setIsPlaying(true))
+              .catch(() => setIsPlaying(false))
+          })
       }
     }
 

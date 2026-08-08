@@ -139,10 +139,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
     const video = videoRef.current
 
     if (isActive) {
-      if (isLegacyFormat) {
-        playMpv(item).catch(() => {})
-        setIsPlaying(true)
-      } else if (video) {
+      if (video) {
         video.muted = muted
         video.volume = volume / 100
         const playPromise = video.play()
@@ -157,9 +154,12 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
               }
             })
             .catch(() => {
-              // Fallback to muted for this play attempt without clearing global preference
+              // Fallback to muted autoplay if browser policy restricts unmuted audio
               video.muted = true
-              video.play().then(() => setIsPlaying(true)).catch(() => {})
+              video
+                .play()
+                .then(() => setIsPlaying(true))
+                .catch(() => {})
             })
         }
       }
@@ -190,7 +190,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
         video.currentTime = 0
       }
     }
-  }, [isActive, item, isLegacyFormat, muted, volume, playMpv])
+  }, [isActive, item, muted, volume])
 
   // Sync audio preferences to HTML5 video element
   useEffect(() => {
@@ -409,6 +409,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
               className="reel-media-video"
               src={streamUrl(item.id)}
               muted={muted}
+              autoPlay={isActive}
               loop
               playsInline
               preload={isActive ? 'auto' : 'metadata'}

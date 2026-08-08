@@ -3,6 +3,10 @@ import { createMainWindow } from './window'
 import { startPythonBackend, stopPythonBackend } from './python'
 import { mpvController, type MpvPlaybackMetadata } from './mpv'
 
+// Configure Chromium media engine for unrestricted instant autoplay and platform decoding
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,VaapiVideoDecoder,VaapiVideoEncoder')
+
 let mainWindow: Awaited<ReturnType<typeof createMainWindow>> | undefined
 let tray: Tray | undefined
 

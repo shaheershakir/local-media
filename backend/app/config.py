@@ -82,7 +82,7 @@ BROWSER_NATIVE_CODECS = frozenset(
         "theora",
     }
 )
-BROWSER_NATIVE_CONTAINERS = frozenset({"mp4", "webm", "mov", "m4v", "ogv", "ogg"})
+BROWSER_NATIVE_CONTAINERS = frozenset({"mp4", "webm", "mov", "m4v", "ogv", "ogg", "mkv"})
 
 # Video file extensions to scan
 VIDEO_EXTENSIONS = frozenset(
