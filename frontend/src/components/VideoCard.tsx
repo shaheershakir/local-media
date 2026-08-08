@@ -162,8 +162,8 @@ export const VideoCard = memo(function VideoCard({
 
       {/* Card Info Details */}
       <div className="video-card-info">
-        <h3 className="video-card-title" title={item.title || item.filename}>
-          {item.title || item.filename}
+        <h3 className="video-card-title" title={item.filename || item.title}>
+          {item.filename || item.title}
         </h3>
 
         <div className="video-card-meta">

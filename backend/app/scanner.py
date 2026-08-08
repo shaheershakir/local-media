@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from app import config
 from app.config import (
+    BROWSER_NATIVE_AUDIO_CODECS,
     BROWSER_NATIVE_CODECS,
     BROWSER_NATIVE_CONTAINERS,
     IMAGE_EXTENSIONS,
@@ -120,8 +121,10 @@ def get_scan_state() -> dict:
 # ── Utility helpers ────────────────────────────────────────────────────────
 
 def _clean_title(filename: str) -> str:
-    """Make a human-readable title from a raw filename."""
-    stem = Path(filename).stem
+    """Make a human-readable title from a raw filename, preserving file extension."""
+    path = Path(filename)
+    stem = path.stem
+    ext = path.suffix.lower()
     # Replace common separators with spaces
     stem = re.sub(r"[._\-]+", " ", stem)
     # Remove resolution tags like 1080p, 720p, 4K
@@ -135,7 +138,9 @@ def _clean_title(filename: str) -> str:
     )
     # Collapse whitespace
     stem = re.sub(r"\s+", " ", stem).strip()
-    return stem or filename
+    if stem:
+        return f"{stem}{ext}" if ext else stem
+    return filename
 
 
 def _orientation_from_resolution(width: int, height: int) -> str:
@@ -228,6 +233,8 @@ def _extract_video_metadata(path: Path) -> Optional[dict]:
     if abs(rotation) in (90, 270):
         width, height = height, width
 
+    audio_codec_name = (audio_stream.get("codec_name") or "").lower() if audio_stream else ""
+
     container = Path(path).suffix.lstrip(".").lower()
 
     # Classify browser native vs needs transcode
@@ -238,6 +245,7 @@ def _extract_video_metadata(path: Path) -> Optional[dict]:
         not is_gif
         and codec_name in BROWSER_NATIVE_CODECS
         and container in BROWSER_NATIVE_CONTAINERS
+        and audio_codec_name in BROWSER_NATIVE_AUDIO_CODECS
     )
 
     return {

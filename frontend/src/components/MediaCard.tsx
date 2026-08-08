@@ -63,12 +63,18 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(item.duration_seconds || 0)
+  const [isScrubbing, setIsScrubbing] = useState(false)
+  const [scrubPercent, setScrubPercent] = useState(0)
   const [showControls, setShowControls] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
   const [hoverX, setHoverX] = useState<number>(0)
   const [flashAction, setFlashAction] = useState<'play' | 'pause' | 'seek-fwd' | 'seek-bwd' | null>(null)
   const [isFav, setIsFav] = useState(Boolean(item.is_favorite))
+
+  const isScrubbingRef = useRef<boolean>(false)
+  const scrubRafRef = useRef<number | null>(null)
+  const lastSeekTimeRef = useRef<number>(0)
 
   // Virtual proximity window: only mount video stream socket within 1 card of active card
   const isNearActive = activeIndex !== undefined ? Math.abs(index - activeIndex) <= 1 : isActive
@@ -217,7 +223,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
 
   const handleVideoTimeUpdate = () => {
     const video = videoRef.current
-    if (!video) return
+    if (!video || isScrubbingRef.current) return
     setCurrentTime(video.currentTime)
     if (video.duration && !isNaN(video.duration)) {
       setDuration(video.duration)
@@ -236,10 +242,8 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
     if (!video) return
 
     if (video.paused) {
-      video.play().then(() => {
-        setIsPlaying(true)
-        flash('play')
-      }).catch(() => {})
+      video.play().then(() => setIsPlaying(true)).catch(() => {})
+      flash('play')
     } else {
       video.pause()
       setIsPlaying(false)
@@ -262,17 +266,56 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
     [isPlayingInMpv, seekMpv, duration, currentTime, resetHideTimer]
   )
 
-  const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    resetHideTimer()
-    const pct = parseFloat(e.target.value)
-    const target = (pct / 100) * duration
-    setCurrentTime(target)
-    if (isPlayingInMpv) {
-      goToPositionMpv(target)
-    } else if (videoRef.current) {
-      videoRef.current.currentTime = target
-    }
-  }
+  // Fluid, lag-free scrubbing handlers with requestAnimationFrame throttling
+  const handleScrubStart = useCallback(() => {
+    isScrubbingRef.current = true
+    setIsScrubbing(true)
+  }, [])
+
+  const handleScrubChange = useCallback(
+    (pct: number) => {
+      resetHideTimer()
+      setScrubPercent(pct)
+      const targetTime = (pct / 100) * (duration || 0)
+      if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
+
+      scrubRafRef.current = requestAnimationFrame(() => {
+        const now = Date.now()
+        if (now - lastSeekTimeRef.current > 50) {
+          lastSeekTimeRef.current = now
+          if (isPlayingInMpv) {
+            goToPositionMpv(targetTime)
+          } else if (videoRef.current) {
+            const v = videoRef.current as any
+            if (typeof v.fastSeek === 'function') {
+              v.fastSeek(targetTime)
+            } else {
+              v.currentTime = targetTime
+            }
+          }
+        }
+      })
+    },
+    [isPlayingInMpv, goToPositionMpv, duration, resetHideTimer]
+  )
+
+  const handleScrubCommit = useCallback(
+    (pct: number) => {
+      resetHideTimer()
+      isScrubbingRef.current = false
+      setIsScrubbing(false)
+      if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
+
+      const targetTime = (pct / 100) * (duration || 0)
+      if (isPlayingInMpv) {
+        goToPositionMpv(targetTime)
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = targetTime
+      }
+      setCurrentTime(targetTime)
+    },
+    [isPlayingInMpv, goToPositionMpv, duration, resetHideTimer]
+  )
 
   const handleScrubberMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const track = scrubberTrackRef.current
@@ -422,6 +465,9 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
                   setDuration(videoRef.current.duration)
                 }
               }}
+              onError={() => {
+                console.warn('Reel playback error for item', item.id)
+              }}
               onEnded={() => {
                 logEvent({
                   media_item_id: item.id,
@@ -482,7 +528,7 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
               </svg>
               {item.folder_label}
             </button>
-            <h2 className="cinema-title">{item.title || item.filename}</h2>
+            <h2 className="cinema-title">{item.filename || item.title}</h2>
           </div>
           <div className="cinema-pill-row">
             {ext && <span className="cinema-pill">{ext}</span>}
@@ -639,12 +685,19 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
                 min="0"
                 max="100"
                 step="0.05"
-                value={isNaN(progressPercent) ? 0 : progressPercent}
-                onChange={handleScrubberChange}
+                value={isNaN(isScrubbing ? scrubPercent : progressPercent) ? 0 : (isScrubbing ? scrubPercent : progressPercent)}
+                onPointerDown={handleScrubStart}
+                onMouseDown={handleScrubStart}
+                onTouchStart={handleScrubStart}
+                onInput={(e) => handleScrubChange(parseFloat(e.currentTarget.value))}
+                onChange={(e) => handleScrubCommit(parseFloat(e.target.value))}
+                onPointerUp={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
+                onMouseUp={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
+                onTouchEnd={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
                 className="cinema-scrubber-input"
                 aria-label="Seek time position"
               />
-              <div className="cinema-scrubber-fill" style={{ width: `${progressPercent}%` }} />
+              <div className="cinema-scrubber-fill" style={{ width: `${isScrubbing ? scrubPercent : progressPercent}%` }} />
               {hoverTime !== null && (
                 <div className="cinema-scrubber-hover-tip" style={{ left: hoverX }}>
                   {formatDuration(hoverTime)}

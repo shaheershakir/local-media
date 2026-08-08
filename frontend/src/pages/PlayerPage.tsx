@@ -161,7 +161,7 @@ export function PlayerPage() {
           {/* Media Metadata Header & Actions Bar */}
           <div className="player-meta-header">
             <div className="player-title-row">
-              <h1 className="player-video-title">{item.title || item.filename}</h1>
+              <h1 className="player-video-title">{item.filename || item.title}</h1>
 
               {/* Action Buttons */}
               <div className="player-action-buttons">

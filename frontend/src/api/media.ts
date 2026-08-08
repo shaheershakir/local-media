@@ -47,6 +47,12 @@ export function fullImageUrl(id: number): string {
   return `${BASE_URL}/media/${id}/full`
 }
 
+export function formatMediaTitle(item?: { title?: string; filename?: string } | null): string {
+  if (!item) return ''
+  if (item.filename) return item.filename
+  return item.title || 'Untitled'
+}
+
 export async function getRandomFeed(params: {
   limit?: number
   exclude_ids?: number[]

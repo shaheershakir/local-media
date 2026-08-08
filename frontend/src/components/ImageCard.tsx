@@ -147,8 +147,8 @@ export const ImageCard = memo(function ImageCard({
 
       {/* Card Info Details */}
       <div className="image-card-info">
-        <h3 className="image-card-title" title={item.title || item.filename}>
-          {item.title || item.filename}
+        <h3 className="image-card-title" title={item.filename || item.title}>
+          {item.filename || item.title}
         </h3>
 
         <div className="image-card-meta">

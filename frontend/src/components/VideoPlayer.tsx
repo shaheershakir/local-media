@@ -35,6 +35,8 @@ export function VideoPlayer({
   const [isPlaying, setIsPlaying] = useState(true)
   const [currentTime, setCurrentTime] = useState(initialTime)
   const [duration, setDuration] = useState(item.duration_seconds || 0)
+  const [isScrubbing, setIsScrubbing] = useState(false)
+  const [scrubTime, setScrubTime] = useState(initialTime)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [hudToast, setHudToast] = useState<{ text: string; direction: 'next' | 'prev' | 'info' } | null>(null)
 
@@ -43,6 +45,9 @@ export function VideoPlayer({
   const wheelAccumRef = useRef<number>(0)
   const wheelTimerRef = useRef<number | null>(null)
   const touchStartY = useRef<number | null>(null)
+  const isScrubbingRef = useRef<boolean>(false)
+  const scrubRafRef = useRef<number | null>(null)
+  const lastSeekTimeRef = useRef<number>(0)
 
   const { muted, toggleMuted, volume, setVolume } = useAudioPreference()
   const {
@@ -86,7 +91,7 @@ export function VideoPlayer({
       showHud('End of folder (no next video)', 'info')
       return
     }
-    showHud(`Next: ${nextVideo.title || nextVideo.filename}`, 'next')
+    showHud(`Next: ${nextVideo.filename || nextVideo.title}`, 'next')
     if (onNavigateItem) {
       onNavigateItem(nextVideo)
     } else {
@@ -99,7 +104,7 @@ export function VideoPlayer({
       showHud('Start of folder (no previous video)', 'info')
       return
     }
-    showHud(`Previous: ${prevVideo.title || prevVideo.filename}`, 'prev')
+    showHud(`Previous: ${prevVideo.filename || prevVideo.title}`, 'prev')
     if (onNavigateItem) {
       onNavigateItem(prevVideo)
     } else {
@@ -107,15 +112,28 @@ export function VideoPlayer({
     }
   }, [hasPrev, prevVideo, onNavigateItem, navigate, showHud])
 
+  const [videoError, setVideoError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState<number>(0)
+
   // 2. Playback initialization when item changes
   useEffect(() => {
     let cancelled = false
+    setVideoError(null)
+    setRetryCount(0)
+    setIsScrubbing(false)
+    isScrubbingRef.current = false
+
     const startPlayback = async () => {
       const startTime = initialTime > 0 ? initialTime : item.duration_watched_seconds || 0
       setCurrentTime(startTime)
+      setScrubTime(startTime)
       setDuration(item.duration_seconds || 0)
 
-      // If MPV is preferred/legacy format, launch MPV
+      if (item.browser_native === 0) {
+        showHud(`Streaming ${item.codec ? item.codec.toUpperCase() : 'legacy format'} on-the-fly`, 'info')
+      }
+
+      // If MPV is preferred/legacy format and desktop MPV is available, launch MPV
       if (item.browser_native === 0 && isMpvAvailable) {
         try {
           const res = await playMpv(item, startTime)
@@ -151,8 +169,9 @@ export function VideoPlayer({
 
     return () => {
       cancelled = true
+      if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
     }
-  }, [item.id, item.browser_native, isMpvAvailable, playMpv, initialTime, volume, muted])
+  }, [item.id, item.browser_native, isMpvAvailable, playMpv, initialTime, volume, muted, showHud])
 
   // 3. Sync volume and muted with AudioPreferenceProvider
   useEffect(() => {
@@ -166,7 +185,9 @@ export function VideoPlayer({
   useEffect(() => {
     if (isPoweredByMpv) {
       if (mpvState.duration > 0) setDuration(mpvState.duration)
-      setCurrentTime(mpvState.currentTime)
+      if (!isScrubbingRef.current) {
+        setCurrentTime(mpvState.currentTime)
+      }
       setIsPlaying(!mpvState.paused)
     }
   }, [isPoweredByMpv, mpvState.currentTime, mpvState.duration, mpvState.paused])
@@ -204,20 +225,57 @@ export function VideoPlayer({
       }
       const video = videoRef.current
       if (!video) return
-      video.currentTime = Math.max(0, Math.min(video.duration || duration, video.currentTime + secondsDelta))
+      const targetTime = Math.max(0, Math.min(video.duration || duration, (isScrubbingRef.current ? scrubTime : video.currentTime) + secondsDelta))
+      video.currentTime = targetTime
+      setCurrentTime(targetTime)
     },
-    [isPoweredByMpv, seekMpv, duration]
+    [isPoweredByMpv, seekMpv, duration, scrubTime]
   )
 
-  const handleSeekTo = useCallback(
+  // Fluid, lag-free scrubbing handlers with requestAnimationFrame throttling
+  const handleScrubStart = useCallback(() => {
+    isScrubbingRef.current = true
+    setIsScrubbing(true)
+  }, [])
+
+  const handleScrubChange = useCallback(
     (targetTime: number) => {
+      setScrubTime(targetTime)
+      if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
+
+      scrubRafRef.current = requestAnimationFrame(() => {
+        const now = Date.now()
+        // Throttle video pipeline seeks during drag to avoid network/decoder choking
+        if (now - lastSeekTimeRef.current > 50) {
+          lastSeekTimeRef.current = now
+          if (isPoweredByMpv) {
+            goToPositionMpv(targetTime)
+          } else if (videoRef.current) {
+            const v = videoRef.current as any
+            if (typeof v.fastSeek === 'function') {
+              v.fastSeek(targetTime)
+            } else {
+              v.currentTime = targetTime
+            }
+          }
+        }
+      })
+    },
+    [isPoweredByMpv, goToPositionMpv]
+  )
+
+  const handleScrubCommit = useCallback(
+    (targetTime: number) => {
+      isScrubbingRef.current = false
+      setIsScrubbing(false)
+      if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
+
       if (isPoweredByMpv) {
         goToPositionMpv(targetTime)
-        return
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = targetTime
       }
-      const video = videoRef.current
-      if (!video) return
-      video.currentTime = targetTime
+      setCurrentTime(targetTime)
     },
     [isPoweredByMpv, goToPositionMpv]
   )
@@ -384,7 +442,7 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         className="player-video-element"
-        src={streamUrl(item.id)}
+        src={`${streamUrl(item.id)}${retryCount > 0 ? `?retry=${retryCount}` : ''}`}
         playsInline
         onTimeUpdate={() => {
           if (videoRef.current) {
@@ -394,13 +452,63 @@ export function VideoPlayer({
         onLoadedMetadata={() => {
           if (videoRef.current) {
             setDuration(videoRef.current.duration || item.duration_seconds || 0)
+            setVideoError(null)
           }
         }}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onEnded={handleVideoEnded}
+        onError={() => {
+          if (retryCount < 2) {
+            // Attempt auto-retry with cache-busting
+            setRetryCount((prev) => prev + 1)
+          } else {
+            setVideoError('Video playback error. Please ensure FFmpeg is transcoding or launch in MPV.')
+            setIsPlaying(false)
+          }
+        }}
         onClick={togglePlay}
       />
+
+      {/* Video Error Fallback Overlay */}
+      {videoError && (
+        <div className="player-error-overlay">
+          <div className="player-error-box">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <div className="player-error-title">Playback Issue</div>
+            <div className="player-error-desc">{videoError}</div>
+            <div className="player-error-actions">
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setVideoError(null)
+                  setRetryCount((prev) => prev + 1)
+                  if (videoRef.current) {
+                    videoRef.current.load()
+                    videoRef.current.play().catch(() => {})
+                  }
+                }}
+                type="button"
+              >
+                Retry Stream
+              </button>
+              {isMpvAvailable && (
+                <button
+                  className="btn-secondary"
+                  onClick={() => playMpv(item, currentTime)}
+                  type="button"
+                >
+                  Play in MPV
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating HUD Feedback Overlay */}
       {hudToast && (
@@ -477,8 +585,15 @@ export function VideoPlayer({
             min={0}
             max={duration || 100}
             step={0.1}
-            value={currentTime}
-            onChange={(e) => handleSeekTo(parseFloat(e.target.value))}
+            value={isScrubbing ? scrubTime : currentTime}
+            onPointerDown={handleScrubStart}
+            onMouseDown={handleScrubStart}
+            onTouchStart={handleScrubStart}
+            onInput={(e) => handleScrubChange(parseFloat(e.currentTarget.value))}
+            onChange={(e) => handleScrubCommit(parseFloat(e.target.value))}
+            onPointerUp={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
+            onMouseUp={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
+            onTouchEnd={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
             aria-label="Video scrubber"
           />
         </div>
@@ -493,7 +608,7 @@ export function VideoPlayer({
               type="button"
               disabled={!hasPrev}
               aria-label="Previous sibling video"
-              title={hasPrev ? `Previous: ${prevVideo?.title || prevVideo?.filename} (ArrowUp / P / Scroll Up)` : 'First video in folder'}
+              title={hasPrev ? `Previous: ${prevVideo?.filename || prevVideo?.title} (ArrowUp / P / Scroll Up)` : 'First video in folder'}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="19 20 9 12 19 4 19 20" />
@@ -510,12 +625,12 @@ export function VideoPlayer({
               title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
             >
               {isPlaying ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="4" width="4" height="16" />
-                  <rect x="14" y="4" width="4" height="16" />
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
                 </svg>
               ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
               )}
@@ -528,7 +643,7 @@ export function VideoPlayer({
               type="button"
               disabled={!hasNext}
               aria-label="Next sibling video"
-              title={hasNext ? `Next: ${nextVideo?.title || nextVideo?.filename} (ArrowDown / N / Scroll Down)` : 'End of folder'}
+              title={hasNext ? `Next: ${nextVideo?.filename || nextVideo?.title} (ArrowDown / N / Scroll Down)` : 'End of folder'}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="5 4 15 12 5 20 5 4" />

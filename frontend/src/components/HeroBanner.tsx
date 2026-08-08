@@ -67,8 +67,8 @@ export function HeroBanner({
           )}
         </div>
 
-        <h1 className="hero-title" title={item.title || item.filename}>
-          {item.title || item.filename}
+        <h1 className="hero-title" title={item.filename || item.title}>
+          {item.filename || item.title}
         </h1>
 
         {(item.folder_label || item.folder_name) && (

@@ -1649,6 +1649,59 @@ body::before {
   white-space: nowrap;
 }
 
+/* Player Error Overlay & Recovery */
+.player-error-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 14, 0.88);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 24px;
+}
+
+.player-error-box {
+  background: var(--c-surface, #18181f);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--r-lg, 12px);
+  padding: 28px 32px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+  animation: modal-fade-in 0.2s ease-out;
+}
+
+.player-error-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--c-text-hi, #f3f4f6);
+}
+
+.player-error-desc {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--c-muted, #9ca3af);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.player-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  justify-content: center;
+}
+
+
 .source-add-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;

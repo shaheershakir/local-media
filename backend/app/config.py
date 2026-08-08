@@ -82,6 +82,18 @@ BROWSER_NATIVE_CODECS = frozenset(
         "theora",
     }
 )
+BROWSER_NATIVE_AUDIO_CODECS = frozenset(
+    {
+        "aac",
+        "mp3",
+        "opus",
+        "vorbis",
+        "flac",
+        "pcm_s16le",
+        "pcm_s24le",
+        "",
+    }
+)
 BROWSER_NATIVE_CONTAINERS = frozenset({"mp4", "webm", "mov", "m4v", "ogv", "ogg", "mkv"})
 
 # Video file extensions to scan
@@ -89,7 +101,8 @@ VIDEO_EXTENSIONS = frozenset(
     {
         ".mp4", ".mkv", ".mov", ".avi", ".wmv", ".webm",
         ".m4v", ".flv", ".ts", ".mts", ".m2ts", ".mpg",
-        ".mpeg", ".3gp", ".ogv", ".gif",
+        ".mpeg", ".3gp", ".ogv", ".gif", ".asf", ".vob",
+        ".divx", ".m2t",
     }
 )
 
@@ -100,3 +113,4 @@ IMAGE_EXTENSIONS = frozenset(
         ".bmp", ".tiff", ".tif",
     }
 )
+

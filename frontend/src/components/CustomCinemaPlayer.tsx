@@ -61,6 +61,8 @@ export function CustomCinemaPlayer({
   const [isPlaying, setIsPlaying] = useState(true)
   const [currentTime, setCurrentTime] = useState(initialTime)
   const [duration, setDuration] = useState(item.duration_seconds || 0)
+  const [isScrubbing, setIsScrubbing] = useState(false)
+  const [scrubPercent, setScrubPercent] = useState(0)
   const [volume, setVolumeState] = useState(100)
   const [muted, setMutedState] = useState(false)
   const [showControls, setShowControls] = useState(true)
@@ -68,6 +70,10 @@ export function CustomCinemaPlayer({
   const [hoverTime, setHoverTime] = useState<number | null>(null)
   const [hoverX, setHoverX] = useState<number>(0)
   const [flashAction, setFlashAction] = useState<'play' | 'pause' | 'seek-fwd' | 'seek-bwd' | null>(null)
+
+  const isScrubbingRef = useRef<boolean>(false)
+  const scrubRafRef = useRef<number | null>(null)
+  const lastSeekTimeRef = useRef<number>(0)
 
   const isPoweredByMpv = isPlayingItem(item.id)
   const ext = getFormatExtension(item.filename)
@@ -99,9 +105,14 @@ export function CustomCinemaPlayer({
     }
   }, [hasPrev, prevVideo, onNavigateItem])
 
+  const [videoError, setVideoError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState<number>(0)
+
   // Start playback on mount
   useEffect(() => {
     let cancelled = false
+    setVideoError(null)
+    setRetryCount(0)
 
     const startPlayback = async () => {
       // Attempt MPV launch first
@@ -121,7 +132,14 @@ export function CustomCinemaPlayer({
         if (initialTime > 0) {
           videoRef.current.currentTime = initialTime
         }
-        videoRef.current.play().catch(() => {})
+        videoRef.current.play().catch(() => {
+          // Fallback to muted playback if autoplay blocked
+          if (videoRef.current) {
+            videoRef.current.muted = true
+            setMutedState(true)
+            videoRef.current.play().catch(() => {})
+          }
+        })
       }
     }
 
@@ -209,16 +227,54 @@ export function CustomCinemaPlayer({
     [isPoweredByMpv, seekMpv, duration, currentTime, resetHideTimer]
   )
 
-  const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const pct = parseFloat(e.target.value)
-    const target = (pct / 100) * duration
-    setCurrentTime(target)
-    if (isPoweredByMpv) {
-      goToPositionMpv(target)
-    } else if (videoRef.current) {
-      videoRef.current.currentTime = target
-    }
-  }
+  // Fluid, lag-free scrubbing handlers with requestAnimationFrame throttling
+  const handleScrubStart = useCallback(() => {
+    isScrubbingRef.current = true
+    setIsScrubbing(true)
+  }, [])
+
+  const handleScrubChange = useCallback(
+    (pct: number) => {
+      setScrubPercent(pct)
+      const targetTime = (pct / 100) * (duration || 0)
+      if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
+
+      scrubRafRef.current = requestAnimationFrame(() => {
+        const now = Date.now()
+        if (now - lastSeekTimeRef.current > 50) {
+          lastSeekTimeRef.current = now
+          if (isPoweredByMpv) {
+            goToPositionMpv(targetTime)
+          } else if (videoRef.current) {
+            const v = videoRef.current as any
+            if (typeof v.fastSeek === 'function') {
+              v.fastSeek(targetTime)
+            } else {
+              v.currentTime = targetTime
+            }
+          }
+        }
+      })
+    },
+    [isPoweredByMpv, goToPositionMpv, duration]
+  )
+
+  const handleScrubCommit = useCallback(
+    (pct: number) => {
+      isScrubbingRef.current = false
+      setIsScrubbing(false)
+      if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
+
+      const targetTime = (pct / 100) * (duration || 0)
+      if (isPoweredByMpv) {
+        goToPositionMpv(targetTime)
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = targetTime
+      }
+      setCurrentTime(targetTime)
+    },
+    [isPoweredByMpv, goToPositionMpv, duration]
+  )
 
   // Fullscreen vertical scrolling navigation (wheel & gestures)
   useEffect(() => {
@@ -349,6 +405,7 @@ export function CustomCinemaPlayer({
   }, [togglePlayPause, handleSeek, handleNext, handlePrev, onClose])
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
+  const displayedPercent = isScrubbing ? scrubPercent : progressPercent
 
   return (
     <div
@@ -361,12 +418,19 @@ export function CustomCinemaPlayer({
       <video
         ref={videoRef}
         className="cinema-video-surface"
-        src={streamUrl(item.id)}
+        src={`${streamUrl(item.id)}${retryCount > 0 ? `?retry=${retryCount}` : ''}`}
         playsInline
         onTimeUpdate={() => {
-          if (!isPoweredByMpv && videoRef.current) {
+          if (!isPoweredByMpv && videoRef.current && !isScrubbingRef.current) {
             setCurrentTime(videoRef.current.currentTime)
             if (videoRef.current.duration) setDuration(videoRef.current.duration)
+          }
+        }}
+        onError={() => {
+          if (retryCount < 2) {
+            setRetryCount((prev) => prev + 1)
+          } else {
+            setVideoError('Playback error for video. Please launch in MPV or retry.')
           }
         }}
         onEnded={() => {
@@ -401,6 +465,46 @@ export function CustomCinemaPlayer({
         </div>
       )}
 
+      {/* Video Error Fallback Overlay */}
+      {videoError && (
+        <div className="player-error-overlay" onClick={(e) => e.stopPropagation()}>
+          <div className="player-error-box">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <div className="player-error-title">Playback Issue</div>
+            <div className="player-error-desc">{videoError}</div>
+            <div className="player-error-actions">
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setVideoError(null)
+                  setRetryCount((prev) => prev + 1)
+                  if (videoRef.current) {
+                    videoRef.current.load()
+                    videoRef.current.play().catch(() => {})
+                  }
+                }}
+                type="button"
+              >
+                Retry Stream
+              </button>
+              {isMpvAvailable && (
+                <button
+                  className="btn-secondary"
+                  onClick={() => playMpv(item, currentTime)}
+                  type="button"
+                >
+                  Play in MPV
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Header Controls */}
       <header className="cinema-top-bar" onClick={(e) => e.stopPropagation()}>
         <button className="cinema-btn-icon" type="button" onClick={onClose} aria-label="Close player">
@@ -409,48 +513,26 @@ export function CustomCinemaPlayer({
           </svg>
         </button>
 
-        <div className="cinema-meta-info">
-          <h1 className="cinema-title">{item.title || item.filename}</h1>
-          <div className="cinema-pill-row">
-            {totalVideos > 1 && (
-              <span className="cinema-pill">
-                {effectiveIndex + 1} / {totalVideos}
-              </span>
-            )}
-            {ext && <span className="cinema-pill">{ext}</span>}
-            {item.codec && <span className="cinema-pill">{item.codec}</span>}
-            {item.resolution && <span className="cinema-pill">{item.resolution}</span>}
-            {item.file_size_bytes && <span className="cinema-pill">{formatBytes(item.file_size_bytes)}</span>}
-            <span className="cinema-pill pill-engine">
-              <span className="cinema-engine-dot" />
-              MPV ENGINE
+        <div className="cinema-top-meta">
+          {item.folder_name && (
+            <span className="cinema-folder-badge">
+              📁 {item.folder_display_name || item.folder_name}
             </span>
-          </div>
+          )}
+          <h1 className="cinema-title">{item.filename || item.title}</h1>
         </div>
 
         <div className="cinema-top-actions">
-          {item.path && window.localfeed?.revealPath && (
-            <button
-              className="cinema-btn-icon"
-              type="button"
-              onClick={() => window.localfeed?.revealPath(item.path)}
-              title="Reveal in local folder"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-              </svg>
-            </button>
+          {totalVideos > 1 && (
+            <span className="cinema-sibling-badge">
+              {effectiveIndex + 1} / {totalVideos}
+            </span>
           )}
-
-          <button className="cinema-btn-icon" type="button" onClick={toggleFullscreen} aria-label="Toggle fullscreen">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              {isFullscreen ? (
-                <path d="M8 3v5H3m13-5v5h5M8 21v-5H3m18 0h-5v5" />
-              ) : (
-                <path d="M3 8V3h5m8 0h5v5M3 16v5h5m8 0h5v-5" />
-              )}
-            </svg>
-          </button>
+          {ext && <span className="cinema-badge">{ext}</span>}
+          {item.codec && <span className="cinema-badge">{item.codec.toUpperCase()}</span>}
+          {item.resolution && <span className="cinema-badge">{item.resolution}</span>}
+          {item.file_size_bytes && <span className="cinema-badge">{formatBytes(item.file_size_bytes)}</span>}
+          {isPoweredByMpv && <span className="cinema-badge cinema-badge-mpv">⚡ MPV ACTIVE</span>}
         </div>
       </header>
 
@@ -473,12 +555,19 @@ export function CustomCinemaPlayer({
               min="0"
               max="100"
               step="0.05"
-              value={isNaN(progressPercent) ? 0 : progressPercent}
-              onChange={handleScrubberChange}
+              value={isNaN(displayedPercent) ? 0 : displayedPercent}
+              onPointerDown={handleScrubStart}
+              onMouseDown={handleScrubStart}
+              onTouchStart={handleScrubStart}
+              onInput={(e) => handleScrubChange(parseFloat(e.currentTarget.value))}
+              onChange={(e) => handleScrubCommit(parseFloat(e.target.value))}
+              onPointerUp={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
+              onMouseUp={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
+              onTouchEnd={(e) => handleScrubCommit(parseFloat(e.currentTarget.value))}
               className="cinema-scrubber-input"
               aria-label="Seek time position"
             />
-            <div className="cinema-scrubber-fill" style={{ width: `${progressPercent}%` }} />
+            <div className="cinema-scrubber-fill" style={{ width: `${displayedPercent}%` }} />
             {hoverTime !== null && (
               <div className="cinema-scrubber-hover-tip" style={{ left: hoverX }}>
                 {formatSeconds(hoverTime)}
@@ -497,7 +586,7 @@ export function CustomCinemaPlayer({
                 type="button"
                 onClick={handlePrev}
                 disabled={!hasPrev}
-                title="Previous Video (ArrowUp / P / Scroll Up)"
+                title={hasPrev ? `Previous: ${prevVideo?.filename || prevVideo?.title} (ArrowUp / P / Scroll Up)` : 'First video in folder'}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <polygon points="19 20 9 12 19 4 19 20" />
@@ -511,16 +600,16 @@ export function CustomCinemaPlayer({
               className="cinema-btn-play"
               type="button"
               onClick={togglePlayPause}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
+              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
             >
               {isPlaying ? (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <rect x="6" y="4" width="4" height="16" rx="1" />
                   <rect x="14" y="4" width="4" height="16" rx="1" />
                 </svg>
               ) : (
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="6 4 20 12 6 20 6 4" />
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
               )}
             </button>
@@ -532,7 +621,7 @@ export function CustomCinemaPlayer({
                 type="button"
                 onClick={handleNext}
                 disabled={!hasNext}
-                title="Next Video (ArrowDown / N / Scroll Down)"
+                title={hasNext ? `Next: ${nextVideo?.filename || nextVideo?.title} (ArrowDown / N / Scroll Down)` : 'End of folder'}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <polygon points="5 4 15 12 5 20 5 4" />
