@@ -244,7 +244,7 @@ export function CustomCinemaPlayer({
         if (now - lastSeekTimeRef.current > 40) {
           lastSeekTimeRef.current = now
           if (isPoweredByMpv) {
-            goToPositionMpv(targetTime, false)
+            goToPositionMpv(targetTime)
           } else if (videoRef.current) {
             const v = videoRef.current as any
             if (typeof v.fastSeek === 'function') {
@@ -267,7 +267,7 @@ export function CustomCinemaPlayer({
 
       const targetTime = (pct / 100) * (duration || 0)
       if (isPoweredByMpv) {
-        goToPositionMpv(targetTime, true)
+        goToPositionMpv(targetTime)
       } else if (videoRef.current) {
         videoRef.current.currentTime = targetTime
       }

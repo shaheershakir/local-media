@@ -12,6 +12,7 @@ export interface MpvPlaybackMetadata {
   title?: string
   startTime?: number
   volume?: number
+  duration?: number
 }
 
 export interface MpvStatus {
@@ -314,6 +315,8 @@ export class MPVController {
     this.currentStatus.activePath = filePath
     this.currentStatus.title = meta?.title || filePath.split(/[/\\]/).pop() || 'Video'
     this.currentStatus.mediaItemId = meta?.id
+    this.currentStatus.currentTime = meta?.startTime || 0
+    this.currentStatus.duration = meta?.duration || 0
     this.currentStatus.running = true
     this.currentStatus.paused = false
 
@@ -325,6 +328,13 @@ export class MPVController {
       } catch {
         // Resume if paused
       }
+
+      try {
+        const d = await mpv.getProperty('duration')
+        if (d !== undefined && d !== null && Number(d) > 0) {
+          this.currentStatus.duration = Number(d)
+        }
+      } catch {}
 
       if (meta?.startTime && meta.startTime > 0) {
         try {
@@ -399,25 +409,24 @@ export class MPVController {
   public async seek(seconds: number): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
       try {
-        await this.mpvInstance.seek(seconds)
-      } catch {}
+        this.mpvInstance.socket.command('seek', [seconds, 'relative'])
+        this.currentStatus.currentTime = Math.max(0, this.currentStatus.currentTime + seconds)
+        this.broadcastStatus()
+      } catch (err) {
+        console.warn('[mpv] seek error:', err)
+      }
     }
   }
 
-  public async goToPosition(seconds: number, exact = true): Promise<void> {
+  public async goToPosition(seconds: number): Promise<void> {
     if (this.mpvInstance && this.currentStatus.running) {
       try {
         const clamped = Math.max(0, seconds)
-        if (exact) {
-          await this.mpvInstance.socket.command('seek', [clamped, 'absolute', 'exact'])
-        } else {
-          await this.mpvInstance.socket.command('seek', [clamped, 'absolute', 'keyframes'])
-        }
+        this.mpvInstance.socket.command('seek', [clamped, 'absolute'])
         this.currentStatus.currentTime = clamped
-      } catch {
-        try {
-          await this.mpvInstance.goToPosition(seconds)
-        } catch {}
+        this.broadcastStatus()
+      } catch (err) {
+        console.warn('[mpv] goToPosition error:', err)
       }
     }
   }

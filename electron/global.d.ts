@@ -19,6 +19,7 @@ export interface MpvPlaybackOptions {
   title?: string
   startTime?: number
   volume?: number
+  duration?: number
 }
 
 declare global {

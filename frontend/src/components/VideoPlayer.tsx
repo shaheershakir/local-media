@@ -207,13 +207,17 @@ export function VideoPlayer({
   // 4. Sync MPV state if active
   useEffect(() => {
     if (isPoweredByMpv) {
-      if (mpvState.duration > 0) setDuration(mpvState.duration)
+      if (mpvState.duration > 1) {
+        setDuration(mpvState.duration)
+      } else if (item.duration_seconds && item.duration_seconds > 0) {
+        setDuration(item.duration_seconds)
+      }
       if (!isScrubbingRef.current) {
         setCurrentTime(mpvState.currentTime)
       }
       setIsPlaying(!mpvState.paused)
     }
-  }, [isPoweredByMpv, mpvState.currentTime, mpvState.duration, mpvState.paused])
+  }, [isPoweredByMpv, mpvState.currentTime, mpvState.duration, mpvState.paused, item.duration_seconds])
 
   // 5. Fullscreen change listener
   useEffect(() => {
@@ -257,7 +261,7 @@ export function VideoPlayer({
     [isPoweredByMpv, seekMpv, duration, scrubTime, currentTime]
   )
 
-  // Fluid, lag-free scrubbing handlers with keyframe preview and exact frame release
+  // Fluid, lag-free scrubbing handlers with requestAnimationFrame throttling
   const handleScrubStart = useCallback(() => {
     isScrubbingRef.current = true
     setIsScrubbing(true)
@@ -270,11 +274,10 @@ export function VideoPlayer({
 
       scrubRafRef.current = requestAnimationFrame(() => {
         const now = Date.now()
-        // Fast keyframe seek during dragging for lag-free 60fps slider motion
         if (now - lastSeekTimeRef.current > 40) {
           lastSeekTimeRef.current = now
           if (isPoweredByMpv) {
-            goToPositionMpv(targetTime, false)
+            goToPositionMpv(targetTime)
           } else if (videoRef.current) {
             const v = videoRef.current as any
             if (typeof v.fastSeek === 'function') {
@@ -295,9 +298,8 @@ export function VideoPlayer({
       setIsScrubbing(false)
       if (scrubRafRef.current) cancelAnimationFrame(scrubRafRef.current)
 
-      // Exact seek landing on release
       if (isPoweredByMpv) {
-        goToPositionMpv(targetTime, true)
+        goToPositionMpv(targetTime)
       } else if (videoRef.current) {
         videoRef.current.currentTime = targetTime
       }
@@ -460,6 +462,13 @@ export function VideoPlayer({
     }
   }
 
+  const effectiveDuration =
+    mpvState.duration && mpvState.duration > 1
+      ? mpvState.duration
+      : item.duration_seconds && item.duration_seconds > 0
+      ? item.duration_seconds
+      : duration
+
   return (
     <div
       ref={theaterRef}
@@ -493,18 +502,28 @@ export function VideoPlayer({
             // Attempt auto-retry with cache-busting
             setRetryCount((prev) => prev + 1)
           } else {
-            setVideoError('Video playback error. Please ensure FFmpeg is transcoding or launch in MPV.')
+            setVideoError('Video stream failed to load or browser format unsupported.')
             setIsPlaying(false)
           }
         }}
         onClick={togglePlay}
       />
 
-      {/* Video Error Fallback Overlay */}
-      {videoError && (
+      {/* MPV Overlay Notice / Placeholder if MPV Active */}
+      {isPoweredByMpv && (
+        <div className="player-mpv-active-overlay" onClick={togglePlay}>
+          <div className="player-mpv-badge">
+            <span className="mpv-indicator-dot" />
+            MPV Native Engine Active
+          </div>
+        </div>
+      )}
+
+      {/* Error Fallback Screen */}
+      {videoError && !isPoweredByMpv && (
         <div className="player-error-overlay">
-          <div className="player-error-box">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2">
+          <div className="player-error-content">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -542,7 +561,7 @@ export function VideoPlayer({
 
       {/* Floating HUD Feedback Overlay */}
       {hudToast && (
-        <div className="player-hud-toast" role="status" aria-live="polite">
+        <div className="player-hud-toast">
           <span className="player-hud-icon">
             {hudToast.direction === 'next' ? (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -613,9 +632,9 @@ export function VideoPlayer({
             type="range"
             className="player-scrubber-slider"
             min={0}
-            max={duration > 0 ? duration : (currentTime > 0 ? currentTime * 1.2 : 100)}
+            max={effectiveDuration > 0 ? effectiveDuration : 100}
             step={0.1}
-            value={isScrubbing ? scrubTime : Math.min(currentTime, duration > 0 ? duration : Math.max(100, currentTime))}
+            value={isScrubbing ? scrubTime : Math.min(currentTime, effectiveDuration > 0 ? effectiveDuration : Math.max(100, currentTime))}
             onPointerDown={handleScrubStart}
             onMouseDown={handleScrubStart}
             onTouchStart={handleScrubStart}
@@ -631,99 +650,79 @@ export function VideoPlayer({
         {/* Controls Bar */}
         <div className="player-controls-bar">
           <div className="player-ctrls-left">
-            {/* Previous Sibling Video Button */}
-            <button
-              className={`player-ctrl-btn${!hasPrev ? ' disabled' : ''}`}
-              onClick={handlePrev}
-              type="button"
-              disabled={!hasPrev}
-              aria-label="Previous sibling video"
-              title={hasPrev ? `Previous: ${prevVideo?.filename || prevVideo?.title} (ArrowUp / P / Scroll Up)` : 'First video in folder'}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="19 20 9 12 19 4 19 20" />
-                <line x1="5" y1="4" x2="5" y2="20" stroke="currentColor" strokeWidth="2.5" />
-              </svg>
-            </button>
-
-            {/* Play/Pause */}
-            <button
-              className="player-ctrl-btn"
-              onClick={togglePlay}
-              type="button"
-              aria-label={isPlaying ? 'Pause video' : 'Play video'}
-              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-            >
+            {/* Play/Pause Button */}
+            <button className="player-ctrl-btn" onClick={togglePlay} type="button" aria-label={isPlaying ? 'Pause' : 'Play'}>
               {isPlaying ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                   <rect x="6" y="4" width="4" height="16" rx="1" />
                   <rect x="14" y="4" width="4" height="16" rx="1" />
                 </svg>
               ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5 3 19 12 5 21 5 3" />
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
                 </svg>
               )}
             </button>
 
-            {/* Next Sibling Video Button */}
-            <button
-              className={`player-ctrl-btn${!hasNext ? ' disabled' : ''}`}
-              onClick={handleNext}
-              type="button"
-              disabled={!hasNext}
-              aria-label="Next sibling video"
-              title={hasNext ? `Next: ${nextVideo?.filename || nextVideo?.title} (ArrowDown / N / Scroll Down)` : 'End of folder'}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 4 15 12 5 20 5 4" />
-                <line x1="19" y1="4" x2="19" y2="20" stroke="currentColor" strokeWidth="2.5" />
-              </svg>
-            </button>
+            {/* Sibling Prev/Next Controls */}
+            {totalVideos > 1 && (
+              <>
+                <button
+                  className="player-ctrl-btn"
+                  onClick={handlePrev}
+                  disabled={!hasPrev}
+                  type="button"
+                  title="Previous Video (P)"
+                  aria-label="Previous video"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                  </svg>
+                </button>
+                <button
+                  className="player-ctrl-btn"
+                  onClick={handleNext}
+                  disabled={!hasNext}
+                  type="button"
+                  title="Next Video (N)"
+                  aria-label="Next video"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                  </svg>
+                </button>
+              </>
+            )}
 
-            {/* Backward 5s */}
-            <button
-              className="player-ctrl-btn"
-              onClick={() => handleSeek(-5)}
-              type="button"
-              aria-label="Seek backward 5 seconds"
-              title="Seek -5s (Left Arrow)"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            {/* Skip Backward 5s */}
+            <button className="player-ctrl-btn" onClick={() => handleSeek(-5)} type="button" title="Rewind 5s (Left Arrow)" aria-label="Rewind 5 seconds">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5" />
               </svg>
             </button>
 
-            {/* Forward 5s */}
-            <button
-              className="player-ctrl-btn"
-              onClick={() => handleSeek(5)}
-              type="button"
-              aria-label="Seek forward 5 seconds"
-              title="Seek +5s (Right Arrow)"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            {/* Skip Forward 5s */}
+            <button className="player-ctrl-btn" onClick={() => handleSeek(5)} type="button" title="Forward 5s (Right Arrow)" aria-label="Forward 5 seconds">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M13 17l5-5-5-5M6 17l5-5-5-5" />
               </svg>
             </button>
 
-            {/* Volume Group */}
-            <div className="player-volume-group">
-              <button
-                className="player-ctrl-btn"
-                onClick={toggleMuted}
-                type="button"
-                aria-label={muted ? 'Unmute' : 'Mute'}
-                title="Mute/Unmute (M)"
-              >
+            {/* Volume Control */}
+            <div className="player-volume-wrapper">
+              <button className="player-ctrl-btn" onClick={toggleMuted} type="button" aria-label={muted ? 'Unmute' : 'Mute'}>
                 {muted || volume === 0 ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="1" y1="1" x2="23" y2="23" />
-                    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-                    <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0a7 7 0 0 1-.11 1.23" />
+                    <path d="M9 9L5 13H1v-2h4l4-4v2z" />
+                  </svg>
+                ) : volume < 50 ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
                   </svg>
                 ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
                   </svg>
@@ -744,7 +743,7 @@ export function VideoPlayer({
             <div className="player-time-display">
               <span className="player-time-current">{formatDuration(isScrubbing ? scrubTime : currentTime)}</span>
               <span className="player-time-divider">/</span>
-              <span className="player-time-duration">{duration > 0 ? formatDuration(duration) : (currentTime > 0 ? formatDuration(currentTime) : '--:--')}</span>
+              <span className="player-time-duration">{effectiveDuration > 0 ? formatDuration(effectiveDuration) : '--:--'}</span>
             </div>
 
             {/* Sibling Badge Counter in Bar */}

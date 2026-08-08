@@ -65,6 +65,7 @@ export function useMpv() {
         id: item.id,
         title: item.title || item.filename,
         startTime: startTime ?? (item.duration_watched_seconds > 0 ? item.duration_watched_seconds : 0),
+        duration: item.duration_seconds || 0,
       })
     } catch (err) {
       console.error('Failed to launch MPV:', err)
