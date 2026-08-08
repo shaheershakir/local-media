@@ -89,7 +89,15 @@ export const VideoCard = memo(function VideoCard({
       aria-label={`Play ${item.title || item.filename}`}
     >
       {/* Thumbnail Container */}
-      <div className="video-card-thumb-wrap">
+      <div className={`video-card-thumb-wrap ${item.orientation || 'landscape'}`}>
+        {item.orientation === 'portrait' && (
+          <img
+            src={thumbnailUrl(item.id)}
+            alt=""
+            className="video-card-thumb-blur"
+            aria-hidden="true"
+          />
+        )}
         <img
           src={thumbnailUrl(item.id)}
           alt={item.title || item.filename}

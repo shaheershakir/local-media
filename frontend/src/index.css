@@ -3190,6 +3190,27 @@ body::before {
   overflow: hidden;
 }
 
+/* Portrait thumb wraps for VideoCard and ImageCard */
+.video-card-thumb-wrap.portrait .video-card-thumb-img,
+.image-card-thumb-wrap.portrait .image-card-thumb-img {
+  object-fit: contain;
+  position: relative;
+  z-index: 2;
+}
+
+.video-card-thumb-blur,
+.image-card-thumb-blur {
+  position: absolute;
+  inset: -10px;
+  width: calc(100% + 20px);
+  height: calc(100% + 20px);
+  object-fit: cover;
+  filter: blur(12px) brightness(0.45);
+  opacity: 0.75;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .video-card-shelf {
   flex: 0 0 260px;
 }
@@ -3798,13 +3819,13 @@ body::before {
 
 .player-page-container {
   padding: 20px 24px calc(var(--nav-height) + 40px);
-  max-width: 1560px;
+  max-width: 1840px;
   margin: 0 auto;
 }
 
 .player-layout-grid {
   display: grid;
-  grid-template-columns: 1fr 380px;
+  grid-template-columns: 1fr 420px;
   gap: 32px;
   align-items: start;
 }
@@ -4186,7 +4207,7 @@ body::before {
 
 /* Skeletons and Infinite Scroll for Recommendation Sidebar */
 .video-card-compact-skeleton {
-  height: 252px;
+  height: 290px;
   width: 100%;
   border-radius: var(--r-md);
 }

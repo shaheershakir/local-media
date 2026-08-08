@@ -80,7 +80,15 @@ export const ImageCard = memo(function ImageCard({
       aria-label={`View photo ${item.title || item.filename}`}
     >
       {/* Thumbnail Container */}
-      <div className="image-card-thumb-wrap">
+      <div className={`image-card-thumb-wrap ${item.orientation || 'landscape'}`}>
+        {item.orientation === 'portrait' && (
+          <img
+            src={thumbnailUrl(item.id)}
+            alt=""
+            className="image-card-thumb-blur"
+            aria-hidden="true"
+          />
+        )}
         <img
           src={thumbnailUrl(item.id)}
           alt={item.title || item.filename}
