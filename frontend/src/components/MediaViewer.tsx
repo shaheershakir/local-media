@@ -92,6 +92,8 @@ export function MediaViewer() {
     return (
       <CustomCinemaPlayer
         item={item}
+        folderItems={folderItems}
+        onNavigateItem={(newItem) => navigate(`/media/${newItem.id}`, { replace: true })}
         onClose={closeViewer}
         initialTime={item.duration_watched_seconds || 0}
       />

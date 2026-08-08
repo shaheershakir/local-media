@@ -5,6 +5,8 @@ import { useMpv } from '../hooks/useMpv'
 
 interface CustomCinemaPlayerProps {
   item: MediaItem
+  folderItems?: MediaItem[]
+  onNavigateItem?: (item: MediaItem) => void
   onClose: () => void
   initialTime?: number
 }
@@ -30,10 +32,19 @@ function getFormatExtension(filename: string): string {
   return match ? match[1].toUpperCase() : ''
 }
 
-export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCinemaPlayerProps) {
+export function CustomCinemaPlayer({
+  item,
+  folderItems = [],
+  onNavigateItem,
+  onClose,
+  initialTime = 0,
+}: CustomCinemaPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hideControlsTimeout = useRef<number | null>(null)
+  const wheelLockRef = useRef<number>(0)
+  const wheelAccumRef = useRef<number>(0)
+  const wheelTimerRef = useRef<number | null>(null)
 
   const {
     mpvState,
@@ -60,6 +71,33 @@ export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCin
 
   const isPoweredByMpv = isPlayingItem(item.id)
   const ext = getFormatExtension(item.filename)
+
+  // Sibling video calculation from folder items
+  const siblingVideos = folderItems.length > 0
+    ? folderItems.filter((i) => i.media_type === 'video')
+    : [item]
+
+  const currentIndex = siblingVideos.findIndex((i) => i.id === item.id)
+  const effectiveIndex = currentIndex >= 0 ? currentIndex : 0
+  const hasPrev = effectiveIndex > 0
+  const hasNext = effectiveIndex < siblingVideos.length - 1
+  const totalVideos = Math.max(1, siblingVideos.length)
+  const prevVideo = hasPrev ? siblingVideos[effectiveIndex - 1] : null
+  const nextVideo = hasNext ? siblingVideos[effectiveIndex + 1] : null
+
+  const handleNext = useCallback(() => {
+    if (!hasNext || !nextVideo) return
+    if (onNavigateItem) {
+      onNavigateItem(nextVideo)
+    }
+  }, [hasNext, nextVideo, onNavigateItem])
+
+  const handlePrev = useCallback(() => {
+    if (!hasPrev || !prevVideo) return
+    if (onNavigateItem) {
+      onNavigateItem(prevVideo)
+    }
+  }, [hasPrev, prevVideo, onNavigateItem])
 
   // Start playback on mount
   useEffect(() => {
@@ -182,6 +220,47 @@ export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCin
     }
   }
 
+  // Fullscreen vertical scrolling navigation (wheel & gestures)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+
+    const handleWheel = (e: WheelEvent) => {
+      const inFullscreen = Boolean(document.fullscreenElement) || isFullscreen
+      if (!inFullscreen && totalVideos <= 1) return
+
+      if (inFullscreen) {
+        e.preventDefault()
+      }
+
+      const now = Date.now()
+      if (now - wheelLockRef.current < 600) return
+
+      wheelAccumRef.current += e.deltaY
+
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
+      wheelTimerRef.current = window.setTimeout(() => {
+        wheelAccumRef.current = 0
+      }, 250)
+
+      if (wheelAccumRef.current >= 35) {
+        wheelLockRef.current = now
+        wheelAccumRef.current = 0
+        handleNext()
+      } else if (wheelAccumRef.current <= -35) {
+        wheelLockRef.current = now
+        wheelAccumRef.current = 0
+        handlePrev()
+      }
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', handleWheel)
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
+    }
+  }, [isFullscreen, totalVideos, handleNext, handlePrev])
+
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10)
     setVolumeState(val)
@@ -234,18 +313,24 @@ export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCin
       } else if (e.key === 'l' || e.key === 'L') {
         e.preventDefault()
         handleSeek(10)
-      } else if (e.key === 'ArrowUp') {
+      } else if (
+        e.key === 'ArrowDown' ||
+        e.key === 'PageDown' ||
+        e.key === 'n' ||
+        e.key === 'N' ||
+        e.key === ']'
+      ) {
         e.preventDefault()
-        const newVol = Math.min(100, volume + 5)
-        setVolumeState(newVol)
-        if (isPoweredByMpv) setVolumeMpv(newVol)
-        else if (videoRef.current) videoRef.current.volume = newVol / 100
-      } else if (e.key === 'ArrowDown') {
+        handleNext()
+      } else if (
+        e.key === 'ArrowUp' ||
+        e.key === 'PageUp' ||
+        e.key === 'p' ||
+        e.key === 'P' ||
+        e.key === '['
+      ) {
         e.preventDefault()
-        const newVol = Math.max(0, volume - 5)
-        setVolumeState(newVol)
-        if (isPoweredByMpv) setVolumeMpv(newVol)
-        else if (videoRef.current) videoRef.current.volume = newVol / 100
+        handlePrev()
       } else if (e.key === 'm' || e.key === 'M') {
         e.preventDefault()
         toggleMute()
@@ -261,7 +346,7 @@ export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCin
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [togglePlayPause, handleSeek, volume, isPoweredByMpv, setVolumeMpv, onClose])
+  }, [togglePlayPause, handleSeek, handleNext, handlePrev, onClose])
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
 
@@ -284,7 +369,13 @@ export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCin
             if (videoRef.current.duration) setDuration(videoRef.current.duration)
           }
         }}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={() => {
+          if (hasNext && nextVideo) {
+            handleNext()
+          } else {
+            setIsPlaying(false)
+          }
+        }}
       />
 
       {/* Center Flash Action Feedback */}
@@ -321,6 +412,11 @@ export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCin
         <div className="cinema-meta-info">
           <h1 className="cinema-title">{item.title || item.filename}</h1>
           <div className="cinema-pill-row">
+            {totalVideos > 1 && (
+              <span className="cinema-pill">
+                {effectiveIndex + 1} / {totalVideos}
+              </span>
+            )}
             {ext && <span className="cinema-pill">{ext}</span>}
             {item.codec && <span className="cinema-pill">{item.codec}</span>}
             {item.resolution && <span className="cinema-pill">{item.resolution}</span>}
@@ -394,6 +490,22 @@ export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCin
         {/* Buttons Row */}
         <div className="cinema-controls-row">
           <div className="cinema-controls-left">
+            {/* Previous Sibling Button */}
+            {totalVideos > 1 && (
+              <button
+                className={`cinema-btn-text-icon${!hasPrev ? ' disabled' : ''}`}
+                type="button"
+                onClick={handlePrev}
+                disabled={!hasPrev}
+                title="Previous Video (ArrowUp / P / Scroll Up)"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="19 20 9 12 19 4 19 20" />
+                  <line x1="5" y1="4" x2="5" y2="20" stroke="currentColor" strokeWidth="2.5" />
+                </svg>
+              </button>
+            )}
+
             {/* Play / Pause */}
             <button
               className="cinema-btn-play"
@@ -412,6 +524,22 @@ export function CustomCinemaPlayer({ item, onClose, initialTime = 0 }: CustomCin
                 </svg>
               )}
             </button>
+
+            {/* Next Sibling Button */}
+            {totalVideos > 1 && (
+              <button
+                className={`cinema-btn-text-icon${!hasNext ? ' disabled' : ''}`}
+                type="button"
+                onClick={handleNext}
+                disabled={!hasNext}
+                title="Next Video (ArrowDown / N / Scroll Down)"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 4 15 12 5 20 5 4" />
+                  <line x1="19" y1="4" x2="19" y2="20" stroke="currentColor" strokeWidth="2.5" />
+                </svg>
+              </button>
+            )}
 
             {/* Jump -10s / +10s */}
             <button className="cinema-btn-text-icon" type="button" onClick={() => handleSeek(-10)} title="Rewind 10s">

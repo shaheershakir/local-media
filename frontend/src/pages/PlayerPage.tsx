@@ -151,7 +151,11 @@ export function PlayerPage() {
               onNavigateItem={handleNavigateMedia}
             />
           ) : (
-            <VideoPlayer item={item} />
+            <VideoPlayer
+              item={item}
+              folderItems={allFolderMedia}
+              onNavigateItem={handleNavigateMedia}
+            />
           )}
 
           {/* Media Metadata Header & Actions Bar */}
