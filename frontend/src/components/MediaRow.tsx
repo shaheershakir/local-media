@@ -2,6 +2,7 @@ import { useRef, useState, useEffect, useCallback, useMemo, memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { MediaItem } from '../api/types'
 import { VideoCard } from './VideoCard'
+import { ImageCard } from './ImageCard'
 import { SectionHeader } from './SectionHeader'
 
 export interface MediaRowProps {
@@ -21,8 +22,8 @@ const OVERSCAN = 3 // Extra cards rendered offscreen on left/right for smooth sc
 
 /**
  * High-performance virtualized horizontal MediaRow component.
- * Features smooth left/right arrow controls, horizontal windowing
- * to avoid rendering offscreen DOM nodes in long rows, and React.memo.
+ * Supports polymorphic rendering of VideoCard and ImageCard with smooth
+ * left/right arrow controls, horizontal windowing, and React.memo.
  */
 export const MediaRow = memo(function MediaRow({
   title,
@@ -141,16 +142,26 @@ export const MediaRow = memo(function MediaRow({
           )}
 
           {/* Rendered window of cards */}
-          {visibleItems.map((item, idx) => (
-            <VideoCard
-              key={item.id || startIndex + idx}
-              item={item}
-              layout="shelf"
-              showProgress={showProgress}
-              onItemClick={onItemClick}
-              onToggleFavorite={onToggleFavorite}
-            />
-          ))}
+          {visibleItems.map((item, idx) =>
+            item.media_type === 'image' ? (
+              <ImageCard
+                key={item.id || startIndex + idx}
+                item={item}
+                layout="shelf"
+                onItemClick={onItemClick}
+                onToggleFavorite={onToggleFavorite}
+              />
+            ) : (
+              <VideoCard
+                key={item.id || startIndex + idx}
+                item={item}
+                layout="shelf"
+                showProgress={showProgress}
+                onItemClick={onItemClick}
+                onToggleFavorite={onToggleFavorite}
+              />
+            )
+          )}
 
           {/* Virtual right spacer */}
           {padRight > 0 && (

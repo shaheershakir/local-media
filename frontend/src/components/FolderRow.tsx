@@ -1,5 +1,6 @@
 import type { Folder, MediaItem } from '../api/types'
 import { VideoCard } from './VideoCard'
+import { ImageCard } from './ImageCard'
 import { SectionHeader } from './SectionHeader'
 
 export interface FolderRowProps {
@@ -11,6 +12,7 @@ export interface FolderRowProps {
 
 /**
  * Reusable FolderRow component for displaying sibling items from the same folder.
+ * Supports polymorphic rendering of VideoCard and ImageCard.
  */
 export function FolderRow({
   folder,
@@ -26,22 +28,32 @@ export function FolderRow({
   return (
     <section className="player-same-folder-section">
       <SectionHeader
-        title={`Other videos in ${folderTitle}`}
+        title={`Other media in ${folderTitle}`}
         subtitle={countLabel}
         moreLabel="View All Folder Media →"
         onMoreClick={onExploreFolder}
       />
 
       <div className="player-folder-grid">
-        {items.map((video) => (
-          <VideoCard
-            key={video.id}
-            item={video}
-            layout="grid"
-            showFolderTag={false}
-            onItemClick={onItemClick}
-          />
-        ))}
+        {items.map((item) =>
+          item.media_type === 'image' ? (
+            <ImageCard
+              key={item.id}
+              item={item}
+              layout="grid"
+              showFolderTag={false}
+              onItemClick={onItemClick}
+            />
+          ) : (
+            <VideoCard
+              key={item.id}
+              item={item}
+              layout="grid"
+              showFolderTag={false}
+              onItemClick={onItemClick}
+            />
+          )
+        )}
       </div>
     </section>
   )

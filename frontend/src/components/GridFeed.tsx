@@ -4,6 +4,7 @@ import { listMedia } from '../api/media'
 import type { MediaItem } from '../api/types'
 import type { SortOption } from '../api/media'
 import { VideoCard } from './VideoCard'
+import { ImageCard } from './ImageCard'
 
 interface GridFeedProps {
   folderId?: number | null
@@ -72,7 +73,7 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
         setLoading(false)
       }
     },
-    [sort, mediaType, folderId, favoritesOnly, searchQuery] // ← removed `loading` from deps
+    [sort, mediaType, folderId, favoritesOnly, searchQuery]
   )
 
   // Reset on filter/sort change
@@ -105,7 +106,7 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
   }, [hasMore, loadPage])
 
   const handleItemClick = (item: MediaItem) => {
-    navigate(`/media/${item.id}`, {
+    navigate(`/watch/${item.id}`, {
       state: { from: `${location.pathname}${location.search}` },
     })
   }
@@ -156,14 +157,23 @@ export function GridFeed({ folderId, favoritesOnly, searchQuery }: GridFeedProps
         </div>
       ) : (
         <div className="media-grid">
-          {items.map((item) => (
-            <VideoCard
-              key={item.id}
-              item={item}
-              layout="grid"
-              onItemClick={() => handleItemClick(item)}
-            />
-          ))}
+          {items.map((item) =>
+            item.media_type === 'image' ? (
+              <ImageCard
+                key={item.id}
+                item={item}
+                layout="grid"
+                onItemClick={() => handleItemClick(item)}
+              />
+            ) : (
+              <VideoCard
+                key={item.id}
+                item={item}
+                layout="grid"
+                onItemClick={() => handleItemClick(item)}
+              />
+            )
+          )}
 
           {/* Loading skeletons */}
           {loading &&

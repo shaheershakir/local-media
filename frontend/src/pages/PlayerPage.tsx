@@ -5,6 +5,7 @@ import { getFolder } from '../api/folders'
 import type { MediaItem, Folder } from '../api/types'
 import { formatDuration, cleanResolution } from '../components/VideoCard'
 import { VideoPlayer } from '../components/VideoPlayer'
+import { ImageViewer } from '../components/ImageViewer'
 import { FolderRow } from '../components/FolderRow'
 import { RecommendationSidebar } from '../components/RecommendationSidebar'
 
@@ -15,9 +16,15 @@ function formatBytes(bytes?: number | null): string {
   return `${mb.toFixed(1)} MB`
 }
 
+function getImageExtension(filename: string): string {
+  const match = filename.match(/\.([0-9a-z]+)(?:[?#]|$)/i)
+  return match ? match[1].toUpperCase() : 'PHOTO'
+}
+
 /**
- * Dedicated Player Page with modular VideoPlayer,
- * FolderRow (other videos from same folder), and RecommendationSidebar.
+ * Dedicated Player Page with modular VideoPlayer (for videos),
+ * ImageViewer with on-screen next/prev arrows and keyboard navigation (for photos),
+ * FolderRow (other media from same folder), and RecommendationSidebar.
  */
 export function PlayerPage() {
   const { id } = useParams<{ id: string }>()
@@ -26,14 +33,15 @@ export function PlayerPage() {
 
   const [item, setItem] = useState<MediaItem | null>(null)
   const [folder, setFolder] = useState<Folder | null>(null)
-  const [sameFolderVideos, setSameFolderVideos] = useState<MediaItem[]>([])
+  const [allFolderMedia, setAllFolderMedia] = useState<MediaItem[]>([])
+  const [sameFolderSiblings, setSameFolderSiblings] = useState<MediaItem[]>([])
   const [isFavorite, setIsFavorite] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const mediaId = Number(id)
 
-  // 1. Fetch current media item & folder sibling videos
+  // 1. Fetch current media item & folder sibling media
   useEffect(() => {
     if (!mediaId || isNaN(mediaId)) return
 
@@ -49,15 +57,17 @@ export function PlayerPage() {
         setItem(media)
         setIsFavorite(Boolean(media.is_favorite))
 
-        // 2. Fetch sibling videos from the exact same folder
+        // 2. Fetch sibling media items from the exact same folder
         if (media.folder_id) {
           try {
-            const folderRes = await getFolder(media.folder_id, { page_size: 50, sort: 'name' })
+            const folderRes = await getFolder(media.folder_id, { page_size: 100, sort: 'name' })
             if (!cancelled) {
               setFolder(folderRes.folder)
-              // Filter out the active item so only sibling videos are shown
-              const siblings = (folderRes.media.items || []).filter((v) => v.id !== media.id)
-              setSameFolderVideos(siblings)
+              const rawItems = folderRes.media.items || []
+              setAllFolderMedia(rawItems)
+              // Filter out the active item so only sibling items are shown in the bottom shelf
+              const siblings = rawItems.filter((v) => v.id !== media.id)
+              setSameFolderSiblings(siblings)
             }
           } catch (fErr) {
             console.error('Failed to load folder siblings:', fErr)
@@ -65,7 +75,7 @@ export function PlayerPage() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Unable to load video')
+          setError(err instanceof Error ? err.message : 'Unable to load media')
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -91,7 +101,7 @@ export function PlayerPage() {
     }
   }
 
-  const handleNavigateVideo = (nextItem: MediaItem) => {
+  const handleNavigateMedia = (nextItem: MediaItem) => {
     navigate(`/watch/${nextItem.id}`, { state: { from: location.pathname } })
   }
 
@@ -99,7 +109,7 @@ export function PlayerPage() {
     return (
       <div className="player-loading-stage">
         <div className="skeleton player-skeleton-theater" />
-        <div className="text-muted t-label">Loading player…</div>
+        <div className="text-muted t-label">Loading media…</div>
       </div>
     )
   }
@@ -112,7 +122,7 @@ export function PlayerPage() {
           <line x1="12" y1="8" x2="12" y2="12" />
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
-        <div className="empty-state-title">Video Unavailable</div>
+        <div className="empty-state-title">Media Unavailable</div>
         <div className="empty-state-body">{error || 'This media item could not be found.'}</div>
         <button className="btn-primary" onClick={() => navigate(-1)}>
           Go Back
@@ -122,17 +132,27 @@ export function PlayerPage() {
   }
 
   const resTag = cleanResolution(item.resolution)
+  const isImage = item.media_type === 'image'
+  const ext = getImageExtension(item.filename)
 
   return (
     <div className="page-enter player-page-container">
       {/* ── 2-Column Responsive Layout: Main Column (Left) + Recommendation Sidebar (Right) ── */}
       <div className="player-layout-grid">
-        {/* ── LEFT COLUMN: Main Theater VideoPlayer, Metadata Bar, FolderRow ── */}
+        {/* ── LEFT COLUMN: Main Theater (VideoPlayer or ImageViewer), Metadata Bar, FolderRow ── */}
         <main className="player-main-column">
-          {/* Main Video Theater Player */}
-          <VideoPlayer item={item} />
+          {/* Main Theater: Render ImageViewer for photos with next/prev arrows, VideoPlayer for videos */}
+          {isImage ? (
+            <ImageViewer
+              item={item}
+              folderItems={allFolderMedia}
+              onNavigateItem={handleNavigateMedia}
+            />
+          ) : (
+            <VideoPlayer item={item} />
+          )}
 
-          {/* Video Metadata Header & Actions Bar */}
+          {/* Media Metadata Header & Actions Bar */}
           <div className="player-meta-header">
             <div className="player-title-row">
               <h1 className="player-video-title">{item.title || item.filename}</h1>
@@ -194,20 +214,21 @@ export function PlayerPage() {
                   📁 {item.folder_display_name || item.folder_name}
                 </span>
               )}
+              <span className="player-tag-badge">{ext}</span>
               {resTag && <span className="player-tag-badge">{resTag}</span>}
               {item.codec && <span className="player-tag-badge">{item.codec.toUpperCase()}</span>}
               {item.file_size_bytes && <span className="player-tag-badge">{formatBytes(item.file_size_bytes)}</span>}
-              {item.duration_seconds && (
+              {item.duration_seconds && !isImage && (
                 <span className="player-tag-badge">{formatDuration(item.duration_seconds)}</span>
               )}
             </div>
           </div>
 
-          {/* ── SAME FOLDER SECTION: Other videos from the same folder ──────── */}
+          {/* ── SAME FOLDER SECTION: Other media from the same folder ──────── */}
           <FolderRow
             folder={folder}
-            items={sameFolderVideos}
-            onItemClick={handleNavigateVideo}
+            items={sameFolderSiblings}
+            onItemClick={handleNavigateMedia}
             onExploreFolder={
               item.folder_id ? () => navigate(`/folders/${item.folder_id}`) : undefined
             }
@@ -218,7 +239,7 @@ export function PlayerPage() {
         <RecommendationSidebar
           currentMediaId={item.id}
           folderId={item.folder_id}
-          onItemClick={handleNavigateVideo}
+          onItemClick={handleNavigateMedia}
         />
       </div>
     </div>

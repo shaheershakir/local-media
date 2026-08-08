@@ -3177,6 +3177,604 @@ body::before {
   flex: 0 0 260px;
 }
 
+/* ── Unified ImageCard Component ─────────────────────────────────────────── */
+
+.image-card {
+  background: var(--c-deep);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform var(--t-med), border-color var(--t-fast), box-shadow var(--t-med);
+  outline: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.image-card:hover,
+.image-card:focus-visible {
+  transform: translateY(-5px);
+  border-color: var(--c-amber);
+  box-shadow: var(--shadow-md), 0 0 20px var(--c-amber-glow);
+}
+
+.image-card-thumb-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--c-void);
+  overflow: hidden;
+}
+
+.image-card-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: transform var(--t-slow), opacity var(--t-fast);
+}
+
+.image-card-thumb-img.loaded {
+  opacity: 1;
+}
+
+.image-card:hover .image-card-thumb-img {
+  transform: scale(1.06);
+}
+
+.image-card-view-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 8, 9, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+
+.image-card:hover .image-card-view-overlay {
+  opacity: 1;
+}
+
+.image-card-view-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--c-amber);
+  color: var(--c-void);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+  transform: scale(0.9);
+  transition: transform var(--t-fast);
+}
+
+.image-card:hover .image-card-view-icon {
+  transform: scale(1.08);
+}
+
+.image-card-badge {
+  position: absolute;
+  background: rgba(8, 8, 9, 0.88);
+  backdrop-filter: blur(8px);
+  color: var(--c-text-hi);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.image-card-format {
+  top: 8px;
+  left: 8px;
+  color: var(--c-amber-hi);
+  border-color: rgba(200, 144, 42, 0.35);
+  display: flex;
+  align-items: center;
+}
+
+.image-card-res {
+  top: 8px;
+  left: 64px;
+  color: var(--c-soft);
+}
+
+.image-card-size {
+  bottom: 8px;
+  right: 8px;
+  color: var(--c-muted);
+}
+
+.image-card-fav-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(8, 8, 9, 0.75);
+  backdrop-filter: blur(8px);
+  border: none;
+  color: var(--c-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--t-fast);
+}
+
+.image-card:hover .image-card-fav-btn,
+.image-card-fav-btn.active {
+  opacity: 1;
+}
+
+.image-card-fav-btn:hover {
+  transform: scale(1.15);
+  color: var(--c-amber-hi);
+}
+
+.image-card-fav-btn.active {
+  color: var(--c-amber-hi);
+  background: rgba(8, 8, 9, 0.9);
+}
+
+.image-card-info {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.image-card-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--c-text-hi);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.image-card-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.image-card-folder {
+  color: var(--c-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.image-card-dim {
+  color: var(--c-muted);
+}
+
+/* ── Compact ImageCard Variant (Sidebar) ─────────────────────────────────── */
+
+.image-card-compact {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  background: var(--c-surface);
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-border);
+}
+
+.image-card-compact:hover {
+  transform: translateX(4px);
+  border-color: var(--c-amber);
+}
+
+.image-card-compact .image-card-thumb-wrap {
+  width: 120px;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+}
+
+.image-card-compact .image-card-info {
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.image-card-compact .image-card-title {
+  font-size: 14px;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.image-card-shelf {
+  flex: 0 0 260px;
+}
+
+/* ── Dedicated Photo App ImageViewer ─────────────────────────────────────── */
+
+.image-viewer-container {
+  position: relative;
+  width: 100%;
+  min-height: 84dvh;
+  background: #060609;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: 0 16px 56px rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+}
+
+.image-viewer-container.fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000;
+  border-radius: 0;
+  border: none;
+  min-height: 100vh;
+}
+
+.image-viewer-toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: linear-gradient(to bottom, rgba(6, 6, 9, 0.94) 0%, rgba(6, 6, 9, 0.5) 65%, transparent 100%);
+  backdrop-filter: blur(8px);
+  gap: 12px;
+  flex-wrap: wrap;
+  pointer-events: auto;
+}
+
+.image-viewer-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.image-viewer-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.image-viewer-counter-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(200, 144, 42, 0.18);
+  border: 1px solid rgba(200, 144, 42, 0.4);
+  color: var(--c-amber-hi);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  backdrop-filter: blur(8px);
+}
+
+.image-viewer-folder-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--c-border);
+  color: var(--c-cream);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all var(--t-fast);
+}
+
+.image-viewer-folder-btn:hover {
+  border-color: var(--c-amber);
+  color: var(--c-amber-hi);
+  background: rgba(200, 144, 42, 0.15);
+}
+
+.image-viewer-pill {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--c-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  backdrop-filter: blur(8px);
+}
+
+.image-viewer-zoom-group {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+.image-viewer-ctrl-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all var(--t-fast);
+}
+
+.image-viewer-zoom-group .image-viewer-ctrl-btn {
+  border: none;
+  border-radius: 0;
+  width: 32px;
+  height: 30px;
+  background: transparent;
+}
+
+.image-viewer-zoom-group .image-viewer-ctrl-btn:not(:last-child) {
+  border-right: 1px solid var(--c-border);
+}
+
+.image-viewer-ctrl-btn:hover:not(:disabled) {
+  border-color: var(--c-amber);
+  color: var(--c-amber-hi);
+  background: rgba(200, 144, 42, 0.2);
+}
+
+.image-viewer-ctrl-btn.active {
+  color: var(--c-amber-hi);
+  background: rgba(200, 144, 42, 0.25);
+}
+
+.image-viewer-ctrl-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ── Image Viewer Stage ─────────────────────────────────────────────────── */
+
+.image-viewer-stage {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 84dvh;
+  height: calc(100vh - 120px);
+  max-height: calc(100vh - 80px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, #101015 0%, #050508 100%);
+  overflow: hidden;
+  user-select: none;
+  cursor: zoom-in;
+  padding: 0;
+}
+
+.image-viewer-container.fullscreen .image-viewer-stage {
+  height: 100vh;
+  min-height: 100vh;
+  max-height: 100vh;
+}
+
+.image-viewer-stage.zoomed {
+  cursor: zoom-out;
+  overflow: auto;
+}
+
+.image-viewer-stage-placeholder {
+  position: absolute;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  filter: blur(16px);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.image-viewer-stage-media {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 2px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.9);
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+
+.image-viewer-stage-media.loaded {
+  opacity: 1;
+}
+
+/* ── Floating Left & Right Arrow Buttons ────────────────────────────────── */
+
+.image-viewer-arrow-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: rgba(14, 14, 18, 0.78);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--c-cream);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 15;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+  transition: all var(--t-fast);
+}
+
+.image-viewer-arrow-left {
+  left: 20px;
+}
+
+.image-viewer-arrow-right {
+  right: 20px;
+}
+
+.image-viewer-arrow-btn:hover:not(:disabled) {
+  background: var(--c-amber);
+  color: var(--c-void);
+  border-color: var(--c-amber-hi);
+  transform: translateY(-50%) scale(1.1);
+  box-shadow: 0 0 28px var(--c-amber-glow-hi), 0 8px 32px rgba(0, 0, 0, 0.8);
+}
+
+.image-viewer-arrow-btn:active:not(:disabled) {
+  transform: translateY(-50%) scale(0.95);
+}
+
+.image-viewer-arrow-btn.disabled,
+.image-viewer-arrow-btn:disabled {
+  opacity: 0.16;
+  pointer-events: none;
+}
+
+/* ── Auto-Hiding Bottom Filmstrip Thumbnail Drawer ──────────────────────── */
+
+.image-viewer-filmstrip-drawer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: linear-gradient(to top, rgba(6, 6, 9, 0.98) 0%, rgba(10, 10, 14, 0.94) 80%, rgba(10, 10, 14, 0) 100%);
+  backdrop-filter: blur(16px);
+  padding: 24px 20px 14px;
+  transform: translateY(105%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.8);
+}
+
+.image-viewer-filmstrip-drawer.visible {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.image-viewer-filmstrip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border) transparent;
+}
+
+.image-viewer-filmstrip::-webkit-scrollbar {
+  height: 6px;
+}
+
+.image-viewer-filmstrip::-webkit-scrollbar-thumb {
+  background: var(--c-border);
+  border-radius: 4px;
+}
+
+.image-viewer-filmstrip-thumb {
+  position: relative;
+  flex: 0 0 80px;
+  height: 52px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--c-surface);
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--t-fast);
+}
+
+.image-viewer-filmstrip-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-viewer-filmstrip-thumb:hover {
+  transform: translateY(-2px);
+  border-color: rgba(200, 144, 42, 0.5);
+}
+
+.image-viewer-filmstrip-thumb.active {
+  border-color: var(--c-amber);
+  box-shadow: 0 0 16px var(--c-amber-glow-hi);
+  transform: scale(1.06);
+}
+
+.image-viewer-filmstrip-indicator {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--c-amber);
+}
+
+/* ── Bottom Hover Peek Indicator ────────────────────────────────────────── */
+
+.image-viewer-bottom-peek {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  pointer-events: none;
+  opacity: 0.65;
+  transition: opacity 0.2s ease;
+}
+
+.image-viewer-peek-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(14, 14, 18, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--c-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
 /* ── Dedicated Player Page Layout ────────────────────────────────────────── */
 
 .player-page-container {

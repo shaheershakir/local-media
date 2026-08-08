@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { MediaItem } from '../api/types'
 import { getRecommendationsPage, type RecTabType } from '../api/recommendations'
 import { VideoCard } from './VideoCard'
+import { ImageCard } from './ImageCard'
 
 export interface RecommendationSidebarProps {
   currentMediaId?: number
@@ -11,6 +12,7 @@ export interface RecommendationSidebarProps {
 
 /**
  * Reusable RecommendationSidebar component with category tabs,
+ * polymorphic rendering of VideoCard and ImageCard (compact layout),
  * lazy-loaded infinite scrolling, and sentinel observation.
  */
 export function RecommendationSidebar({
@@ -82,6 +84,7 @@ export function RecommendationSidebar({
       setHasMore(res.hasMore)
     } catch (err) {
       console.error('Failed to load more recommendations:', err)
+      setItems([])
       setHasMore(false)
     } finally {
       setLoadingMore(false)
@@ -107,7 +110,7 @@ export function RecommendationSidebar({
   }, [loadMore, hasMore, loadingMore, loadingInitial])
 
   return (
-    <aside className="player-rec-sidebar" aria-label="Recommended Videos Sidebar">
+    <aside className="player-rec-sidebar" aria-label="Recommendations Sidebar">
       <div className="player-rec-header">
         <h2 className="player-rec-title">Recommendations</h2>
         <div className="player-rec-tabs">
@@ -150,14 +153,23 @@ export function RecommendationSidebar({
         ) : items.length === 0 ? (
           <div className="player-rec-empty">No recommendations found.</div>
         ) : (
-          items.map((recItem) => (
-            <VideoCard
-              key={`${tab}-${recItem.id}`}
-              item={recItem}
-              layout="compact"
-              onItemClick={onItemClick}
-            />
-          ))
+          items.map((recItem) =>
+            recItem.media_type === 'image' ? (
+              <ImageCard
+                key={`${tab}-${recItem.id}`}
+                item={recItem}
+                layout="compact"
+                onItemClick={onItemClick}
+              />
+            ) : (
+              <VideoCard
+                key={`${tab}-${recItem.id}`}
+                item={recItem}
+                layout="compact"
+                onItemClick={onItemClick}
+              />
+            )
+          )
         )}
 
         {/* Loading dots */}
