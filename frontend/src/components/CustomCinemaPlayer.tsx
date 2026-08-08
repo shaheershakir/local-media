@@ -416,7 +416,7 @@ export function CustomCinemaPlayer({
       <video
         ref={videoRef}
         className="cinema-video-surface"
-        src={`${streamUrl(item.id)}${retryCount > 0 ? `?retry=${retryCount}` : ''}`}
+        src={!isPoweredByMpv ? `${streamUrl(item.id)}${retryCount > 0 ? `?retry=${retryCount}` : ''}` : undefined}
         playsInline
         onTimeUpdate={() => {
           if (!isPoweredByMpv && videoRef.current && !isScrubbingRef.current) {

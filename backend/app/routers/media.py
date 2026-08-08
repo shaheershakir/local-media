@@ -441,8 +441,7 @@ def stream_video(
         return _serve_file_with_range(str(file_path), request, content_type)
 
     # 3. For legacy non-browser-native files (AVI, WMV, FLV, MPG, etc.):
-    # Queue background transcode so full file is cached for subsequent seeking
-    queue_background_transcode(item_id, str(file_path))
+    # Delivers instant zero-latency fragmented MP4 stream without forced background disk transcoding
 
     # Determine seek offset from query parameters (?t=10 or ?seek=10) or Range header
     seek_offset = 0.0

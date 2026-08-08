@@ -149,21 +149,24 @@ export function VideoPlayer({
       setScrubTime(startTime)
       setDuration(item.duration_seconds || 0)
 
-      if (item.browser_native === 0) {
-        showHud(`Streaming ${item.codec ? item.codec.toUpperCase() : 'legacy format'} on-the-fly`, 'info')
-      }
-
-      // If MPV is preferred/legacy format and desktop MPV is available, launch MPV
-      if (item.browser_native === 0 && isMpvAvailable) {
+      // Direct interface with MPV in Electron app with zero transcoding for all videos!
+      if (isMpvAvailable || Boolean(window.localfeed?.mpv)) {
         try {
           const res = await playMpv(item, startTime)
-          if (res?.success) return
+          if (res?.success && !cancelled) {
+            showHud(`MPV Native Playback`, 'info')
+            return
+          }
         } catch {
           // fallback to HTML5 video
         }
       }
 
-      // In-browser HTML5 video stream
+      if (item.browser_native === 0) {
+        showHud(`Streaming ${item.codec ? item.codec.toUpperCase() : 'legacy format'} on-the-fly`, 'info')
+      }
+
+      // In-browser HTML5 video stream (for web browser environment)
       const video = videoRef.current
       if (video && !cancelled) {
         video.volume = volume / 100
@@ -466,7 +469,7 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         className="player-video-element"
-        src={`${streamUrl(item.id)}${retryCount > 0 ? `?retry=${retryCount}` : ''}`}
+        src={!isPoweredByMpv ? `${streamUrl(item.id)}${retryCount > 0 ? `?retry=${retryCount}` : ''}` : undefined}
         playsInline
         onTimeUpdate={() => {
           if (videoRef.current) {

@@ -17,7 +17,7 @@ export interface MpvState {
 
 export function useMpv() {
   const [mpvState, setMpvState] = useState<MpvState>({
-    available: false,
+    available: Boolean(window.localfeed?.mpv),
     running: false,
     currentTime: 0,
     duration: 0,
