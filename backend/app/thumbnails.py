@@ -263,6 +263,8 @@ def transcode_video(item_id: int, file_path: str) -> Optional[Path]:
                 "-b:a", "128k",
                 "-ar", "44100",
                 "-ac", "2",
+                "-sn",
+                "-dn",
                 "-max_muxing_queue_size", "1024",
                 "-movflags", "+faststart",
                 str(tmp_path),
