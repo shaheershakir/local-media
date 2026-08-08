@@ -369,8 +369,8 @@ def stream_video(item_id: int, request: Request):
     if transcoded_path.exists():
         return _serve_file_with_range(str(transcoded_path), request, "video/mp4")
 
-    # For GIF or legacy non-playable files, transcode on-demand and cache
-    if ext in (".gif", ".wmv", ".flv", ".3gp"):
+    # For legacy non-browser-native files, transcode on-demand and cache
+    if not row["browser_native"]:
         transcoded = transcode_video(item_id, str(file_path))
         if transcoded and transcoded.exists():
             return _serve_file_with_range(str(transcoded), request, "video/mp4")

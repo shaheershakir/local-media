@@ -342,6 +342,10 @@ body::before {
   cursor: pointer;
 }
 
+.reels-container:fullscreen .reel-card {
+  height: 100dvh;
+}
+
 /* Container maintaining actual intrinsic aspect ratio with zero distortion or stretching */
 .reel-media-wrapper {
   position: absolute;
@@ -3153,7 +3157,7 @@ body::before {
 }
 
 .video-card-compact .video-card-thumb-wrap {
-  width: 120px;
+  width: 160px;
   flex-shrink: 0;
   border-radius: var(--r-sm);
 }
@@ -3382,7 +3386,7 @@ body::before {
 }
 
 .image-card-compact .image-card-thumb-wrap {
-  width: 120px;
+  width: 160px;
   flex-shrink: 0;
   border-radius: var(--r-sm);
 }
@@ -3785,7 +3789,7 @@ body::before {
 
 .player-layout-grid {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: 1fr 380px;
   gap: 32px;
   align-items: start;
 }
@@ -4167,7 +4171,7 @@ body::before {
 
 /* Skeletons and Infinite Scroll for Recommendation Sidebar */
 .video-card-compact-skeleton {
-  height: 86px;
+  height: 106px;
   width: 100%;
   border-radius: var(--r-md);
 }

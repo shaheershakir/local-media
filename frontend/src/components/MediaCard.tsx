@@ -102,7 +102,9 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
   // Track fullscreen changes
   useEffect(() => {
     const handleFsChange = () => {
-      setIsFullscreen(document.fullscreenElement === cardRef.current)
+      const fsEl = document.fullscreenElement
+      const isFs = fsEl !== null && (fsEl === cardRef.current || fsEl === cardRef.current?.closest('.reels-container'))
+      setIsFullscreen(isFs)
     }
     document.addEventListener('fullscreenchange', handleFsChange)
     return () => document.removeEventListener('fullscreenchange', handleFsChange)
@@ -313,7 +315,8 @@ export function MediaCard({ item, index, activeIndex, isActive, onCardVisible }:
       if (document.fullscreenElement) {
         await document.exitFullscreen()
       } else {
-        await cardRef.current?.requestFullscreen()
+        const container = cardRef.current?.closest('.reels-container') || cardRef.current
+        await container?.requestFullscreen()
       }
     } catch {
       // Browser declined
