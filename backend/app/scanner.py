@@ -159,6 +159,8 @@ def _run_ffprobe(path: Path) -> Optional[dict]:
         result = subprocess.run(
             [
                 "ffprobe", "-v", "quiet",
+                "-analyzeduration", "2000000",
+                "-probesize", "2000000",
                 "-print_format", "json",
                 "-show_format",
                 "-show_streams",
@@ -636,7 +638,6 @@ def _do_scan(roots: list[Path]) -> None:
 
                 writes_since_commit += 1
                 if writes_since_commit >= max(1, SCAN_DB_BATCH_SIZE):
-                    _update_folder_aggregates(conn)
                     conn.commit()
                     writes_since_commit = 0
 

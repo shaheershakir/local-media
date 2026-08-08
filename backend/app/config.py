@@ -63,8 +63,8 @@ PORT: int = int(os.environ.get("PORT", "8000"))
 MAX_PAGE_SIZE: int = int(os.environ.get("MAX_PAGE_SIZE", "50"))
 THUMBNAIL_WIDTH: int = int(os.environ.get("THUMBNAIL_WIDTH", "400"))
 THUMBNAIL_WORKERS: int = int(os.environ.get("THUMBNAIL_WORKERS", "2"))
-SCAN_METADATA_WORKERS: int = int(os.environ.get("SCAN_METADATA_WORKERS", "4"))
-SCAN_DB_BATCH_SIZE: int = int(os.environ.get("SCAN_DB_BATCH_SIZE", "500"))
+SCAN_METADATA_WORKERS: int = int(os.environ.get("SCAN_METADATA_WORKERS", "8"))
+SCAN_DB_BATCH_SIZE: int = int(os.environ.get("SCAN_DB_BATCH_SIZE", "1000"))
 
 # In-memory ID cache TTL (seconds) — used by feed random sampling
 ID_CACHE_TTL: int = 300  # 5 minutes
