@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getRandomFeed } from '../api/media'
 import type { MediaItem } from '../api/types'
 
@@ -81,6 +81,15 @@ export function useInfiniteFeed(mediaType?: 'video' | 'image' | null) {
       setLoading(false)
     }
   }, [mediaType])
+
+  // Reset exclusion window and reload when mediaType changes
+  useEffect(() => {
+    recentIds.current = []
+    setItems([])
+    loadingRef.current = false
+    lastFetchTime.current = 0
+    fetchBatch()
+  }, [mediaType, fetchBatch])
 
   const onCardVisible = useCallback(
     (index: number) => {

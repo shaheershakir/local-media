@@ -239,13 +239,84 @@ body::before {
 
 /* ── Reels feed (TikTok-style Snap Autoplay & Cinema Player UI) ──────────────── */
 
-.page-content:has(.reels-container) {
+.page-content:has(.reels-container),
+.page-content:has(.reels-wrapper) {
   overflow: hidden;
   padding-bottom: 0;
 }
 
-.reels-container {
+.reels-wrapper {
+  position: relative;
+  width: 100%;
   height: calc(100dvh - var(--nav-height));
+  overflow: hidden;
+  background: #000000;
+}
+
+/* Floating Glassmorphic Filter Bar for Feed */
+.reels-filter-bar {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  background: rgba(14, 14, 18, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 100px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.2);
+  animation: filterBarSlideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+}
+
+@keyframes filterBarSlideDown {
+  from { opacity: 0; transform: translate(-50%, -10px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.reels-filter-pill {
+  background: transparent;
+  border: none;
+  color: var(--c-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  padding: 6px 14px;
+  border-radius: 100px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all var(--t-fast);
+  white-space: nowrap;
+  outline: none;
+}
+
+.reels-filter-pill:hover {
+  color: var(--c-text-hi);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.reels-filter-pill:focus-visible {
+  outline: 2px solid var(--c-amber);
+  outline-offset: 2px;
+}
+
+.reels-filter-pill.active {
+  background: var(--c-amber);
+  color: var(--c-void);
+  font-weight: 600;
+  box-shadow: 0 2px 14px var(--c-amber-glow-hi);
+}
+
+.reels-container {
+  height: 100%;
   width: 100%;
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
