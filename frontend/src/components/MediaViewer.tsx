@@ -5,6 +5,7 @@ import { getFolder } from '../api/folders'
 import type { MediaItem } from '../api/types'
 import { CustomCinemaPlayer } from './CustomCinemaPlayer'
 import { ImageViewer } from './ImageViewer'
+import { useNavigationStack } from '../hooks/useNavigationStack'
 
 interface ViewerLocationState {
   from?: string
@@ -14,6 +15,7 @@ export function MediaViewer() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  const { goBack, canGoBack } = useNavigationStack()
   const [item, setItem] = useState<MediaItem | null>(null)
   const [folderItems, setFolderItems] = useState<MediaItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -21,8 +23,12 @@ export function MediaViewer() {
   const locationState = location.state as ViewerLocationState | null
 
   const closeViewer = useCallback(() => {
-    navigate(locationState?.from || '/explore', { replace: true })
-  }, [locationState?.from, navigate])
+    if (canGoBack) {
+      goBack()
+    } else {
+      navigate(locationState?.from || '/explore', { replace: true })
+    }
+  }, [canGoBack, goBack, locationState?.from, navigate])
 
   useEffect(() => {
     if (!id) return

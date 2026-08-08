@@ -1,5 +1,7 @@
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import { BottomNav } from './components/BottomNav'
+import { TopNav } from './components/TopNav'
+import { NavigationGestures } from './components/NavigationGestures'
 import { ScanProgress } from './components/ScanProgress'
 import { HomePage } from './pages/HomePage'
 import { PlayerPage } from './pages/PlayerPage'
@@ -11,6 +13,7 @@ import { SearchPage } from './pages/SearchPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { MpvFloatingControl } from './components/MpvFloatingControl'
 import { AudioPreferenceProvider } from './contexts/AudioPreferenceProvider'
+import { NavigationStackProvider } from './contexts/NavigationStackContext'
 import './index.css'
 
 // Favorites page — reuses GridFeed with favoritesOnly filter
@@ -47,36 +50,45 @@ export default function App() {
   return (
     <HashRouter>
       <AudioPreferenceProvider>
-        <div className="app-shell">
-          {/* Scan progress banner (visible across all pages when scan is running) */}
-          <ScanProgress />
+        <NavigationStackProvider>
+          <div className="app-shell">
+            {/* Top Navigation Bar with Back/Forward buttons and Stack History */}
+            <TopNav />
 
-          {/* Page content */}
-          <main className="page-content">
-            <Routes>
-              {/* Home is the default page */}
-              <Route path="/" element={<HomePage />} />
-              {/* Feed continues working exactly as before */}
-              <Route path="/feed" element={<FeedPage />} />
-              {/* Dedicated Player Page */}
-              <Route path="/watch/:id" element={<PlayerPage />} />
-              <Route path="/media/:id" element={<PlayerPage />} />
-              <Route path="/explore" element={<ExplorePage />} />
-              <Route path="/folders" element={<FoldersPage />} />
-              <Route path="/folders/:id" element={<FolderProfile />} />
-              <Route path="/favorites" element={<FavoritesPage />} />
-              <Route path="/search" element={<SearchPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-            </Routes>
-          </main>
+            {/* Gesture-based swipe back & shortcuts overlay */}
+            <NavigationGestures />
 
-          {/* Floating MPV Playback Controller */}
-          <MpvFloatingControl />
+            {/* Scan progress banner (visible across all pages when scan is running) */}
+            <ScanProgress />
 
-          {/* Bottom navigation */}
-          <BottomNav />
-        </div>
+            {/* Page content */}
+            <main className="page-content">
+              <Routes>
+                {/* Home is the default page */}
+                <Route path="/" element={<HomePage />} />
+                {/* Feed continues working exactly as before */}
+                <Route path="/feed" element={<FeedPage />} />
+                {/* Dedicated Player Page */}
+                <Route path="/watch/:id" element={<PlayerPage />} />
+                <Route path="/media/:id" element={<PlayerPage />} />
+                <Route path="/explore" element={<ExplorePage />} />
+                <Route path="/folders" element={<FoldersPage />} />
+                <Route path="/folders/:id" element={<FolderProfile />} />
+                <Route path="/favorites" element={<FavoritesPage />} />
+                <Route path="/search" element={<SearchPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+              </Routes>
+            </main>
+
+            {/* Floating MPV Playback Controller */}
+            <MpvFloatingControl />
+
+            {/* Bottom navigation */}
+            <BottomNav />
+          </div>
+        </NavigationStackProvider>
       </AudioPreferenceProvider>
     </HashRouter>
   )
 }
+

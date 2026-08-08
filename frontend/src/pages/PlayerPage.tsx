@@ -8,6 +8,7 @@ import { VideoPlayer } from '../components/VideoPlayer'
 import { ImageViewer } from '../components/ImageViewer'
 import { FolderRow } from '../components/FolderRow'
 import { RecommendationSidebar } from '../components/RecommendationSidebar'
+import { useNavigationStack } from '../hooks/useNavigationStack'
 
 function formatBytes(bytes?: number | null): string {
   if (!bytes) return ''
@@ -30,6 +31,7 @@ export function PlayerPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  const { goBack } = useNavigationStack()
 
   const [item, setItem] = useState<MediaItem | null>(null)
   const [folder, setFolder] = useState<Folder | null>(null)
@@ -124,7 +126,7 @@ export function PlayerPage() {
         </svg>
         <div className="empty-state-title">Media Unavailable</div>
         <div className="empty-state-body">{error || 'This media item could not be found.'}</div>
-        <button className="btn-primary" onClick={() => navigate(-1)}>
+        <button className="btn-primary" onClick={goBack}>
           Go Back
         </button>
       </div>

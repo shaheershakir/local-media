@@ -1,29 +1,65 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listFolders } from '../api/folders'
 import { thumbnailUrl } from '../api/media'
 import type { Folder } from '../api/types'
 import { useScanStatus } from '../hooks/useScanStatus'
+import { useNavigationStack } from '../hooks/useNavigationStack'
 
 const PAGE_SIZE = 50
 
+interface FoldersStateCache {
+  folders: Folder[]
+  total: number
+  page: number
+  hasMore: boolean
+}
+
 export function FoldersPage() {
   const navigate = useNavigate()
-  const [folders, setFolders] = useState<Folder[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
+  const { getPageState, savePageState } = useNavigationStack()
+  const cached = getPageState<FoldersStateCache>('folders-page-state')
+
+  const [folders, setFolders] = useState<Folder[]>(cached?.folders || [])
+  const [total, setTotal] = useState(cached?.total || 0)
+  const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(cached?.page || 1)
+  const [hasMore, setHasMore] = useState(cached?.hasMore ?? true)
+
+  const isInitialMountRef = useRef(true)
+
+  const syncCache = useCallback(
+    (newFolders: Folder[], newTotal: number, newPage: number, newHasMore: boolean) => {
+      savePageState('folders-page-state', {
+        folders: newFolders,
+        total: newTotal,
+        page: newPage,
+        hasMore: newHasMore,
+      })
+    },
+    [savePageState]
+  )
 
   const loadFolders = async (pageNum: number, reset = false) => {
     setLoading(true)
     try {
       const res = await listFolders({ page: pageNum, page_size: PAGE_SIZE })
-      setTotal(res.total)
-      setFolders((prev) => (reset ? res.items : [...prev, ...res.items]))
-      setHasMore(pageNum < res.pages)
+      const nextTotal = res.total
+      const nextHasMore = pageNum < res.pages
+      setTotal(nextTotal)
+      setHasMore(nextHasMore)
+      if (reset) {
+        setFolders(res.items)
+        syncCache(res.items, nextTotal, pageNum, nextHasMore)
+      } else {
+        setFolders((prev) => {
+          const merged = [...prev, ...res.items]
+          syncCache(merged, nextTotal, pageNum, nextHasMore)
+          return merged
+        })
+      }
     } catch (e) {
-      console.error(e)
+      console.error('Failed to load folders:', e)
     } finally {
       setLoading(false)
     }
@@ -36,15 +72,19 @@ export function FoldersPage() {
     },
     (s) => {
       if (s.running && s.files_scanned > 0) {
-        // Incrementally refresh folders list as batches are indexed
         loadFolders(1, true)
       }
     }
   )
 
   useEffect(() => {
+    if (isInitialMountRef.current && cached && cached.folders.length > 0) {
+      isInitialMountRef.current = false
+      return
+    }
+    isInitialMountRef.current = false
     loadFolders(1, true)
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const isScanning = Boolean(status?.running)
   const isDiscovering = isScanning && status?.files_total === 0

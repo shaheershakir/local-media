@@ -4,10 +4,12 @@ import { getFolder } from '../api/folders'
 import { thumbnailUrl } from '../api/media'
 import { GridFeed } from './GridFeed'
 import type { FolderDetail } from '../api/folders'
+import { useNavigationStack } from '../hooks/useNavigationStack'
 
 export function FolderProfile() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { goBack } = useNavigationStack()
   const [detail, setDetail] = useState<FolderDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -35,7 +37,7 @@ export function FolderProfile() {
     return (
       <div className="empty-state">
         <div className="empty-state-title">Folder not found</div>
-        <button className="btn-secondary" onClick={() => navigate(-1)}>Go back</button>
+        <button className="btn-secondary" onClick={goBack}>Go back</button>
       </div>
     )
   }
@@ -59,7 +61,10 @@ export function FolderProfile() {
 
         {/* Back button */}
         <button
-          onClick={() => navigate(-1)}
+          onClick={goBack}
+          type="button"
+          title="Go Back (Alt+←, Backspace, or 2-finger swipe)"
+          aria-label="Go Back"
           style={{
             position: 'absolute',
             top: 16,

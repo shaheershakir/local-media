@@ -1,14 +1,27 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { GridFeed } from '../components/GridFeed'
+import { useNavigationStack } from '../hooks/useNavigationStack'
 
 export function SearchPage() {
-  const [query, setQuery] = useState('')
-  const [submittedQuery, setSubmittedQuery] = useState('')
+  const { getPageState, savePageState } = useNavigationStack()
+  const cachedSearch = getPageState<{ query: string; submittedQuery: string }>('search-page-state')
 
-  const handleSearch = useCallback((e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmittedQuery(query.trim())
-  }, [query])
+  const [query, setQuery] = useState(cachedSearch?.query || '')
+  const [submittedQuery, setSubmittedQuery] = useState(cachedSearch?.submittedQuery || '')
+
+  useEffect(() => {
+    savePageState('search-page-state', { query, submittedQuery })
+  }, [query, submittedQuery, savePageState])
+
+  const handleSearch = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault()
+      const trimmed = query.trim()
+      setSubmittedQuery(trimmed)
+      savePageState('search-page-state', { query, submittedQuery: trimmed })
+    },
+    [query, savePageState]
+  )
 
   return (
     <div className="page-enter">
@@ -19,8 +32,8 @@ export function SearchPage() {
       <form onSubmit={handleSearch}>
         <div className="search-bar">
           <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <circle cx="11" cy="11" r="8"/>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
           <input
             id="search-input"
@@ -29,7 +42,7 @@ export function SearchPage() {
             placeholder="Search titles, folders, filenames…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            autoFocus
+            autoFocus={!submittedQuery}
           />
         </div>
       </form>
@@ -47,7 +60,8 @@ export function SearchPage() {
       ) : (
         <div className="empty-state" style={{ minHeight: '50dvh' }}>
           <svg className="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
           <div className="empty-state-title">What are you looking for?</div>
           <div className="empty-state-body">Search by title, filename, or folder name.</div>
