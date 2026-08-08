@@ -1286,19 +1286,143 @@ body::before {
   transform: translateX(20px);
 }
 
+.source-item--scanning {
+  background: rgba(200, 144, 42, 0.05);
+  border-left: 2px solid var(--c-amber);
+}
+
 .source-item-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.source-item-path-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .source-item-path {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--c-text);
+  font-weight: 500;
+  color: var(--c-text-hi);
   letter-spacing: 0.02em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Source Status Badges */
+.source-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: all var(--t-fast);
+}
+
+.source-status-badge--scanning {
+  background: rgba(200, 144, 42, 0.15);
+  border: 1px solid rgba(200, 144, 42, 0.4);
+  color: var(--c-amber-hi);
+  box-shadow: 0 0 12px rgba(200, 144, 42, 0.2);
+}
+
+.source-status-badge--ready {
+  background: rgba(80, 200, 120, 0.12);
+  border: 1px solid rgba(80, 200, 120, 0.3);
+  color: #50c878;
+}
+
+.source-status-badge--error {
+  background: rgba(224, 80, 80, 0.12);
+  border: 1px solid rgba(224, 80, 80, 0.3);
+  color: #ff6b6b;
+}
+
+.source-status-eta {
+  color: var(--c-soft);
+  font-weight: 400;
+  text-transform: lowercase;
+}
+
+/* Pulse Dots */
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pulse-dot--amber {
+  background: var(--c-amber);
+  box-shadow: 0 0 8px var(--c-amber);
+  animation: statusPulseAmber 1.4s infinite ease-in-out;
+}
+
+.pulse-dot--green {
+  background: #50c878;
+  box-shadow: 0 0 6px #50c878;
+}
+
+.pulse-dot--red {
+  background: #ff6b6b;
+  box-shadow: 0 0 6px #ff6b6b;
+}
+
+@keyframes statusPulseAmber {
+  0%, 100% {
+    transform: scale(0.85);
+    opacity: 0.6;
+    box-shadow: 0 0 4px var(--c-amber);
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+    box-shadow: 0 0 12px var(--c-amber-glow-hi);
+  }
+}
+
+/* Embedded Micro Progress Track */
+.source-progress-track {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.source-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--c-amber) 0%, var(--c-amber-hi) 100%);
+  border-radius: 2px;
+  box-shadow: 0 0 8px var(--c-amber-glow-hi);
+  transition: width 0.3s ease;
+}
+
+.source-progress-fill--indeterminate {
+  width: 100%;
+  background: linear-gradient(90deg, transparent 0%, var(--c-amber) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: indeterminateShimmer 1.5s infinite linear;
+}
+
+@keyframes indeterminateShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .source-item-warning {
@@ -1336,22 +1460,28 @@ body::before {
   color: var(--c-soft);
 }
 
-.source-scan-btn:hover {
+.source-scan-btn.active-scanning {
+  color: var(--c-amber);
+  border-color: var(--c-amber);
+  background: rgba(200, 144, 42, 0.1);
+}
+
+.source-scan-btn:hover:not(:disabled) {
   background: var(--c-amber-glow);
   border-color: var(--c-amber);
   color: var(--c-amber);
 }
 
 .source-scan-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .source-delete-btn {
   color: var(--c-muted);
 }
 
-.source-delete-btn:hover {
+.source-delete-btn:hover:not(:disabled) {
   background: rgba(224, 80, 80, 0.1);
   border-color: rgba(224, 80, 80, 0.4);
   color: #e05050;

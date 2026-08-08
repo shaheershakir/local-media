@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import threading
 from fastapi import APIRouter, HTTPException
+from app import config
 from app.scanner import run_scan, get_scan_state
-from app.config import MEDIA_ROOTS
 
 router = APIRouter(prefix="/api/scan", tags=["scan"])
 
@@ -17,10 +17,10 @@ router = APIRouter(prefix="/api/scan", tags=["scan"])
 @router.post("")
 def start_scan():
     """Trigger an incremental library scan in the background."""
-    if not MEDIA_ROOTS:
+    if not config.MEDIA_ROOTS:
         raise HTTPException(
             status_code=400,
-            detail="No MEDIA_ROOTS configured. Edit your .env file and restart.",
+            detail="No MEDIA_ROOTS configured. Please add a source in Settings.",
         )
     state = get_scan_state()
     if state["running"]:

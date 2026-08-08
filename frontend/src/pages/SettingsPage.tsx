@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getSources, addSource, removeSource, type Source } from '../api/sources'
 import { startScan } from '../api/scan'
+import { useScanStatus } from '../hooks/useScanStatus'
 
 export function SettingsPage() {
   const [sources, setSources] = useState<Source[]>([])
@@ -23,6 +24,15 @@ export function SettingsPage() {
       setLoading(false)
     }
   }, [])
+
+  // Live scan polling: auto-refresh source metadata when scan completes
+  const { status: scanStatus } = useScanStatus(
+    () => {
+      fetchSources()
+      setScanningPath(null)
+      setSuccess('Library scan complete')
+    }
+  )
 
   useEffect(() => {
     fetchSources()
@@ -51,7 +61,7 @@ export function SettingsPage() {
       setError(null)
       await addSource(trimmed)
       setNewPath('')
-      setSuccess('Source added successfully')
+      setSuccess('Source added — scanning media files…')
       await fetchSources()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add source')
@@ -79,16 +89,14 @@ export function SettingsPage() {
       setScanningPath(path)
       setError(null)
       await startScan()
-      setSuccess('Scan started')
+      setSuccess('Scanning source library…')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start scan')
-    } finally {
       setScanningPath(null)
     }
   }
 
   const handleBrowse = async () => {
-    // Electron exposes a dialog API via the preload bridge
     if (window.localfeed?.selectFolder) {
       try {
         const dir = await window.localfeed.selectFolder()
@@ -97,7 +105,6 @@ export function SettingsPage() {
         setError('Failed to open folder picker')
       }
     } else {
-      // Fallback: hint the user to paste manually
       setError('Folder picker is only available in the desktop app. Please paste the path manually.')
     }
   }
@@ -106,6 +113,19 @@ export function SettingsPage() {
     if (e.key === 'Enter' && !adding) {
       handleAdd()
     }
+  }
+
+  const isScanning = Boolean(scanStatus?.running)
+  const isDiscovering = isScanning && scanStatus?.files_total === 0
+  const scanPercent =
+    scanStatus && scanStatus.files_total > 0
+      ? Math.min(100, Math.round((scanStatus.files_scanned / scanStatus.files_total) * 100))
+      : 0
+
+  const formatEta = (secs: number | null | undefined): string => {
+    if (!secs) return ''
+    if (secs < 60) return `~${secs}s remaining`
+    return `~${Math.round(secs / 60)}m remaining`
   }
 
   return (
@@ -144,7 +164,7 @@ export function SettingsPage() {
           </div>
           <div>
             <h2 className="settings-section-title">Media Sources</h2>
-            <p className="settings-section-desc">Directories scanned for photos and videos</p>
+            <p className="settings-section-desc">Directories indexed for photos, movies, and videos</p>
           </div>
         </div>
 
@@ -189,13 +209,13 @@ export function SettingsPage() {
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
             )}
-            Add
+            Add Source
           </button>
         </div>
 
         {/* Source List */}
         <div className="source-list">
-          {loading ? (
+          {loading && sources.length === 0 ? (
             <div className="source-empty">
               <span className="source-spinner" />
               Loading sources…
@@ -206,26 +226,62 @@ export function SettingsPage() {
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
               </svg>
               <span>No sources configured yet</span>
-              <span className="source-empty-hint">Add a folder path above to get started</span>
+              <span className="source-empty-hint">Add a folder path above to index your library</span>
             </div>
           ) : (
             sources.map((source) => (
               <div
                 key={source.path}
-                className={`source-item${removingPath === source.path ? ' source-item--removing' : ''}`}
+                className={`source-item${removingPath === source.path ? ' source-item--removing' : ''}${
+                  isScanning ? ' source-item--scanning' : ''
+                }`}
               >
                 <div className="source-item-info">
-                  <div className="source-item-path">{source.path}</div>
-                  {!source.exists && (
-                    <span className="source-item-warning">Path not found</span>
+                  <div className="source-item-path-row">
+                    <span className="source-item-path">{source.path}</span>
+                    {/* Live loading/scanning status badge */}
+                    {isScanning ? (
+                      <span className="source-status-badge source-status-badge--scanning">
+                        <span className="pulse-dot pulse-dot--amber" />
+                        {isDiscovering ? (
+                          'Discovering files…'
+                        ) : (
+                          `Indexing ${scanStatus?.files_scanned.toLocaleString()} / ${scanStatus?.files_total.toLocaleString()} (${scanPercent}%)`
+                        )}
+                        {scanStatus?.estimated_seconds_remaining != null && (
+                          <span className="source-status-eta"> · {formatEta(scanStatus.estimated_seconds_remaining)}</span>
+                        )}
+                      </span>
+                    ) : source.exists ? (
+                      <span className="source-status-badge source-status-badge--ready">
+                        <span className="pulse-dot pulse-dot--green" />
+                        {source.item_count ? `${source.item_count.toLocaleString()} items indexed` : 'Ready · Indexed'}
+                      </span>
+                    ) : (
+                      <span className="source-status-badge source-status-badge--error">
+                        <span className="pulse-dot pulse-dot--red" />
+                        Path not found
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Embedded live progress bar when scanning */}
+                  {isScanning && (
+                    <div className="source-progress-track">
+                      <div
+                        className={`source-progress-fill${isDiscovering ? ' source-progress-fill--indeterminate' : ''}`}
+                        style={{ width: isDiscovering ? '100%' : `${scanPercent}%` }}
+                      />
+                    </div>
                   )}
                 </div>
+
                 <div className="source-item-actions">
                   <button
-                    className="source-action-btn source-scan-btn"
+                    className={`source-action-btn source-scan-btn${isScanning || scanningPath === source.path ? ' active-scanning' : ''}`}
                     onClick={() => handleScan(source.path)}
-                    disabled={scanningPath === source.path}
-                    title="Rescan this source"
+                    disabled={isScanning || scanningPath === source.path}
+                    title={isScanning ? 'Scan in progress' : 'Rescan this source'}
                   >
                     <svg
                       width="15"
@@ -234,7 +290,7 @@ export function SettingsPage() {
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="1.5"
-                      className={scanningPath === source.path ? 'spin' : ''}
+                      className={isScanning || scanningPath === source.path ? 'spin' : ''}
                     >
                       <polyline points="23 4 23 10 17 10" />
                       <polyline points="1 20 1 14 7 14" />
@@ -265,7 +321,7 @@ export function SettingsPage() {
 
       {/* App Info */}
       <div className="settings-footer">
-        <span className="settings-footer-text">LocalFeed v1.0</span>
+        <span className="settings-footer-text">LocalFeed v1.0 · High Performance Local Media Server</span>
       </div>
     </div>
   )

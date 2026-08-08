@@ -6,6 +6,7 @@ import type { MediaItem, Folder } from '../api/types'
 import { HeroBanner } from '../components/HeroBanner'
 import { MediaRow } from '../components/MediaRow'
 import { LazyFolderRow } from '../components/LazyFolderRow'
+import { useScanStatus } from '../hooks/useScanStatus'
 
 /**
  * Ultra-responsive, high-performance Home Page.
@@ -75,6 +76,11 @@ export const HomePage = memo(function HomePage() {
       setLoading(false)
     }
   }, [])
+
+  // Auto-reload when scan completes
+  useScanStatus(() => {
+    loadHomeContent()
+  })
 
   useEffect(() => {
     loadHomeContent()

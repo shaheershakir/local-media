@@ -21,8 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
+from app import config
 from app.config import (
     BROWSER_NATIVE_CODECS,
     BROWSER_NATIVE_CONTAINERS,
@@ -32,7 +31,7 @@ from app.config import (
     SCAN_METADATA_WORKERS,
     VIDEO_EXTENSIONS,
 )
-from app.db import get_db
+from app.db import get_db, create_schema
 
 logger = logging.getLogger("localfeed.scanner")
 
@@ -310,28 +309,20 @@ def _upsert_folder(
     folder_cache: dict[str, int],
 ) -> int:
     """
-    Ensure a folder row exists for folder_path. Also ensures all parent folders
-    up to (but not including) root_path exist. Returns the folder id.
+    Ensure a folder row exists for folder_path and all parent folders
+    up to root_path. Returns the folder id.
     """
-    # Build chain from root → folder
-    rel = folder_path.relative_to(root_path)
-    parts = list(rel.parts)
-
-    parent_id = None
-    current_path = root_path
-
-    # Media files may live directly in the configured root. Represent that
-    # root as a folder too, otherwise folder_id would be NULL on insert.
-    if not parts:
-        root_str = str(root_path)
-        cached_id = folder_cache.get(root_str)
-        if cached_id is not None:
-            return cached_id
+    # 1. Ensure root source folder exists
+    root_str = str(root_path)
+    cached_root_id = folder_cache.get(root_str)
+    if cached_root_id is not None:
+        root_id = cached_root_id
+    else:
         row = conn.execute(
             "SELECT id FROM folders WHERE path = ?", (root_str,)
         ).fetchone()
         if row:
-            folder_id = row["id"]
+            root_id = row["id"]
         else:
             cursor = conn.execute(
                 """
@@ -340,10 +331,21 @@ def _upsert_folder(
                 """,
                 (root_path.name or str(root_path), root_str),
             )
-            folder_id = cursor.lastrowid
-        folder_cache[root_str] = folder_id
-        return folder_id
+            root_id = cursor.lastrowid
+        folder_cache[root_str] = root_id
 
+    # If the media file is directly in the root path, return root_id
+    try:
+        rel = folder_path.relative_to(root_path)
+        parts = list(rel.parts)
+    except ValueError:
+        parts = []
+
+    if not parts:
+        return root_id
+
+    parent_id = root_id
+    current_path = root_path
     for part in parts:
         current_path = current_path / part
         path_str = str(current_path)
@@ -354,11 +356,16 @@ def _upsert_folder(
             continue
 
         row = conn.execute(
-            "SELECT id FROM folders WHERE path = ?", (path_str,)
+            "SELECT id, parent_folder_id FROM folders WHERE path = ?", (path_str,)
         ).fetchone()
 
         if row:
             folder_id = row["id"]
+            if row["parent_folder_id"] != parent_id:
+                conn.execute(
+                    "UPDATE folders SET parent_folder_id = ? WHERE id = ?",
+                    (parent_id, folder_id),
+                )
         else:
             cursor = conn.execute(
                 """
@@ -372,7 +379,7 @@ def _upsert_folder(
         folder_cache[path_str] = folder_id
         parent_id = folder_id
 
-    return parent_id  # type: ignore[return-value]
+    return parent_id
 
 
 # ── Main scan logic ────────────────────────────────────────────────────────
@@ -422,40 +429,113 @@ def _get_existing_paths(conn) -> dict[str, dict]:
     return {r["path"]: dict(r) for r in rows}
 
 
+_rescan_requested: bool = False
+
+
+def _update_folder_aggregates(conn) -> None:
+    """Update item_count and cover thumbnails for folders."""
+    try:
+        folder_counts = conn.execute(
+            """
+            WITH RECURSIVE subfolder_tree(root_id, child_id) AS (
+                SELECT id, id FROM folders
+                UNION ALL
+                SELECT s.root_id, f.id FROM folders f
+                JOIN subfolder_tree s ON f.parent_folder_id = s.child_id
+            )
+            SELECT s.root_id, COUNT(m.id) as total_items
+            FROM subfolder_tree s
+            LEFT JOIN media_items m ON m.folder_id = s.child_id AND m.is_active = 1
+            GROUP BY s.root_id
+            """
+        ).fetchall()
+
+        for row in folder_counts:
+            conn.execute(
+                "UPDATE folders SET item_count = ? WHERE id = ?",
+                (row["total_items"], row["root_id"]),
+            )
+
+        conn.execute(
+            """
+            WITH RECURSIVE subfolder_tree(root_id, child_id) AS (
+                SELECT id, id FROM folders
+                UNION ALL
+                SELECT s.root_id, f.id FROM folders f
+                JOIN subfolder_tree s ON f.parent_folder_id = s.child_id
+            )
+            UPDATE folders SET cover_thumbnail_path = (
+                SELECT m.thumbnail_path FROM subfolder_tree s
+                JOIN media_items m ON m.folder_id = s.child_id AND m.is_active = 1
+                WHERE s.root_id = folders.id AND m.thumbnail_path IS NOT NULL
+                ORDER BY m.id ASC LIMIT 1
+            )
+            WHERE cover_thumbnail_path IS NULL
+            """
+        )
+    except Exception as e:
+        logger.warning("Could not update folder aggregates: %s", e)
+
+
 def run_scan(roots: list[Path] | None = None) -> None:
     """
     Full incremental scan. Safe to call from a background thread.
-    Only one scan runs at a time (guarded by _scan_lock check).
+    If another scan is requested while a scan is currently running,
+    queues a follow-up scan pass so all roots are fully processed.
     """
-    global _scan_state
+    global _scan_state, _rescan_requested
 
     with _scan_lock:
         if _scan_state.running:
-            logger.info("Scan already running — ignoring duplicate request")
+            _rescan_requested = True
+            logger.info("Scan already running — queued follow-up re-scan request")
             return
         _scan_state = ScanState(
             running=True,
             started_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
+        _rescan_requested = False
 
-    if roots is None:
-        roots = MEDIA_ROOTS
+    while True:
+        if roots is None:
+            scan_roots = list(config.MEDIA_ROOTS)
+        else:
+            scan_roots = list(roots)
 
-    logger.info("Starting scan of %d root(s): %s", len(roots), roots)
+        logger.info("Starting scan of %d root(s): %s", len(scan_roots), scan_roots)
 
-    try:
-        _do_scan(roots)
-    except Exception as e:
-        logger.exception("Scan crashed: %s", e)
+        # Ensure schema exists — handles the case where the DB was deleted while
+        # the server is running (create_schema uses IF NOT EXISTS so it's safe).
+        try:
+            create_schema()
+        except Exception as e:
+            logger.error("Failed to initialise database schema: %s", e)
+            with _scan_lock:
+                _scan_state.running = False
+                _scan_state.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            return
+
+        try:
+            _do_scan(scan_roots)
+        except Exception as e:
+            logger.exception("Scan crashed: %s", e)
+            with _scan_lock:
+                _scan_state.errors += 1
+                _scan_state.error_log.append(f"Fatal: {e}")
+
+        # Check if another scan pass was requested while this pass was executing
         with _scan_lock:
-            _scan_state.errors += 1
-            _scan_state.error_log.append(f"Fatal: {e}")
-    finally:
-        with _scan_lock:
-            _scan_state.running = False
-            _scan_state.finished_at = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            if _rescan_requested:
+                _rescan_requested = False
+                roots = None  # Reload latest config.MEDIA_ROOTS
+                logger.info("Executing queued follow-up re-scan pass")
+                continue
+            else:
+                _scan_state.running = False
+                _scan_state.finished_at = datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+                break
 
     logger.info(
         "Scan complete: %d new, %d updated, %d skipped, %d errors",
@@ -556,31 +636,19 @@ def _do_scan(roots: list[Path]) -> None:
 
                 writes_since_commit += 1
                 if writes_since_commit >= max(1, SCAN_DB_BATCH_SIZE):
+                    _update_folder_aggregates(conn)
                     conn.commit()
                     writes_since_commit = 0
 
-        # Phase 4: update folder aggregates once after all writes.
-        conn.execute(
-            """
-            UPDATE folders SET item_count = (
-                SELECT COUNT(*) FROM media_items
-                WHERE folder_id = folders.id AND is_active = 1
-            )
-            """
-        )
-        # Set cover thumbnails for folders that don't have one
-        conn.execute(
-            """
-            UPDATE folders SET cover_thumbnail_path = (
-                SELECT thumbnail_path FROM media_items
-                WHERE folder_id = folders.id AND is_active = 1
-                  AND thumbnail_path IS NOT NULL
-                ORDER BY ROWID ASC LIMIT 1
-            )
-            WHERE cover_thumbnail_path IS NULL
-            """
-        )
+        # Phase 4: final folder aggregates, cover thumbnails, and cache invalidation.
+        _update_folder_aggregates(conn)
         conn.commit()
+
+        try:
+            from app.routers.feed import invalidate_id_cache
+            invalidate_id_cache()
+        except Exception:
+            pass
 
 
 def _extract_file_metadata(path: Path) -> tuple[dict, Optional[str]]:

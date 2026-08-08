@@ -11,6 +11,16 @@ from pathlib import Path
 from app.config import DB_PATH
 
 
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    """Check if the primary table exists; if not, execute CREATE_SCHEMA."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='folders'"
+    ).fetchone()
+    if not row:
+        conn.executescript(CREATE_SCHEMA)
+        conn.commit()
+
+
 def _get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -19,6 +29,7 @@ def _get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA cache_size=-32000")  # 32 MB page cache
+    _ensure_schema(conn)
     return conn
 
 

@@ -38,27 +38,45 @@ def list_folders(
             rows = conn.execute(
                 """
                 SELECT * FROM folders
-                WHERE parent_folder_id IS NULL AND item_count > 0
+                WHERE parent_folder_id IS NULL AND (
+                    item_count > 0
+                    OR EXISTS (SELECT 1 FROM media_items m WHERE m.folder_id = folders.id AND m.is_active = 1)
+                )
                 ORDER BY name ASC
                 LIMIT ? OFFSET ?
                 """,
                 (page_size, offset),
             ).fetchall()
             total = conn.execute(
-                "SELECT COUNT(*) FROM folders WHERE parent_folder_id IS NULL AND item_count > 0"
+                """
+                SELECT COUNT(*) FROM folders
+                WHERE parent_folder_id IS NULL AND (
+                    item_count > 0
+                    OR EXISTS (SELECT 1 FROM media_items m WHERE m.folder_id = folders.id AND m.is_active = 1)
+                )
+                """
             ).fetchone()[0]
         else:
             rows = conn.execute(
                 """
                 SELECT * FROM folders
-                WHERE parent_folder_id = ? AND item_count > 0
+                WHERE parent_folder_id = ? AND (
+                    item_count > 0
+                    OR EXISTS (SELECT 1 FROM media_items m WHERE m.folder_id = folders.id AND m.is_active = 1)
+                )
                 ORDER BY name ASC
                 LIMIT ? OFFSET ?
                 """,
                 (parent_id, page_size, offset),
             ).fetchall()
             total = conn.execute(
-                "SELECT COUNT(*) FROM folders WHERE parent_folder_id = ? AND item_count > 0",
+                """
+                SELECT COUNT(*) FROM folders
+                WHERE parent_folder_id = ? AND (
+                    item_count > 0
+                    OR EXISTS (SELECT 1 FROM media_items m WHERE m.folder_id = folders.id AND m.is_active = 1)
+                )
+                """,
                 (parent_id,),
             ).fetchone()[0]
 
@@ -78,7 +96,7 @@ def get_folder(
     page_size: int = Query(30, ge=1, le=100),
     sort: str = Query("newest"),
 ):
-    """Get folder detail with paginated media items and subfolders."""
+    """Get folder detail with paginated media items (direct + descendants) and subfolders."""
     with get_db() as conn:
         folder = conn.execute(
             "SELECT * FROM folders WHERE id = ?", (folder_id,)
@@ -86,7 +104,7 @@ def get_folder(
         if not folder:
             raise HTTPException(status_code=404, detail="Folder not found")
 
-        # Subfolders
+        # Immediate subfolders
         subfolders = conn.execute(
             """
             SELECT * FROM folders WHERE parent_folder_id = ? AND item_count > 0
@@ -95,7 +113,7 @@ def get_folder(
             (folder_id,),
         ).fetchall()
 
-        # Media items with sort
+        # Media items with sort (direct and recursive descendant media items)
         order_clause = {
             "newest": "file_modified_at DESC",
             "oldest": "file_modified_at ASC",
@@ -107,8 +125,14 @@ def get_folder(
         offset = (page - 1) * page_size
         media_rows = conn.execute(
             f"""
+            WITH RECURSIVE subfolder_ids(id) AS (
+                SELECT ?
+                UNION ALL
+                SELECT f.id FROM folders f
+                JOIN subfolder_ids s ON f.parent_folder_id = s.id
+            )
             SELECT * FROM media_items
-            WHERE folder_id = ? AND is_active = 1
+            WHERE folder_id IN (SELECT id FROM subfolder_ids) AND is_active = 1
             ORDER BY {order_clause}
             LIMIT ? OFFSET ?
             """,
@@ -116,7 +140,16 @@ def get_folder(
         ).fetchall()
 
         total_media = conn.execute(
-            "SELECT COUNT(*) FROM media_items WHERE folder_id = ? AND is_active = 1",
+            """
+            WITH RECURSIVE subfolder_ids(id) AS (
+                SELECT ?
+                UNION ALL
+                SELECT f.id FROM folders f
+                JOIN subfolder_ids s ON f.parent_folder_id = s.id
+            )
+            SELECT COUNT(*) FROM media_items
+            WHERE folder_id IN (SELECT id FROM subfolder_ids) AND is_active = 1
+            """,
             (folder_id,),
         ).fetchone()[0]
 

@@ -59,7 +59,17 @@ def list_media(
         params.append(media_type)
 
     if folder_id is not None:
-        conditions.append("m.folder_id = ?")
+        conditions.append("""
+            m.folder_id IN (
+                WITH RECURSIVE subfolder_ids(id) AS (
+                    SELECT ?
+                    UNION ALL
+                    SELECT f.id FROM folders f
+                    JOIN subfolder_ids s ON f.parent_folder_id = s.id
+                )
+                SELECT id FROM subfolder_ids
+            )
+        """)
         params.append(folder_id)
 
     if favorites_only:

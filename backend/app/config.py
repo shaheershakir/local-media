@@ -30,9 +30,10 @@ def _parse_media_roots() -> list[Path]:
     raw = os.environ.get("MEDIA_ROOTS", "").strip()
     if not raw:
         return []
+    raw = raw.strip('"').strip("'")
     roots = []
     for part in raw.split(","):
-        part = part.strip()
+        part = part.strip().strip('"').strip("'")
         if not part:
             continue
         p = Path(part).expanduser().resolve()

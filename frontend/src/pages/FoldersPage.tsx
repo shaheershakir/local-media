@@ -5,6 +5,8 @@ import { thumbnailUrl } from '../api/media'
 import type { Folder } from '../api/types'
 import { useScanStatus } from '../hooks/useScanStatus'
 
+const PAGE_SIZE = 50
+
 export function FoldersPage() {
   const navigate = useNavigate()
   const [folders, setFolders] = useState<Folder[]>([])
@@ -12,9 +14,6 @@ export function FoldersPage() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
-  const { status, triggerScan } = useScanStatus()
-
-  const PAGE_SIZE = 50
 
   const loadFolders = async (pageNum: number, reset = false) => {
     setLoading(true)
@@ -30,9 +29,25 @@ export function FoldersPage() {
     }
   }
 
+  // Reload folders on completion and periodically refresh while scanning
+  const { status, triggerScan } = useScanStatus(
+    () => {
+      loadFolders(1, true)
+    },
+    (s) => {
+      if (s.running && s.files_scanned > 0) {
+        // Incrementally refresh folders list as batches are indexed
+        loadFolders(1, true)
+      }
+    }
+  )
+
   useEffect(() => {
     loadFolders(1, true)
   }, [])
+
+  const isScanning = Boolean(status?.running)
+  const isDiscovering = isScanning && status?.files_total === 0
 
   return (
     <div className="page-enter">
@@ -42,26 +57,55 @@ export function FoldersPage() {
       </div>
 
       {/* Scan trigger */}
-      <div style={{ padding: '0 16px 16px', display: 'flex', gap: 10, alignItems: 'center' }}>
+      <div style={{ padding: '0 16px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
           className="btn-secondary"
           onClick={triggerScan}
-          disabled={status?.running}
+          disabled={isScanning}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={isScanning ? 'spin' : ''}>
             <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
           </svg>
-          {status?.running ? 'Scanning…' : 'Rescan Library'}
+          {isScanning ? (isDiscovering ? 'Discovering files…' : 'Scanning…') : 'Rescan Library'}
         </button>
-        {status?.running && (
+        {isScanning && !isDiscovering && status && (
           <span className="text-muted t-label">
             {status.files_scanned.toLocaleString()} / {status.files_total.toLocaleString()} files
           </span>
         )}
       </div>
 
-      {loading && folders.length === 0 ? (
+      {/* Active scanning state with skeletons if no folders yet */}
+      {isScanning && folders.length === 0 ? (
+        <div style={{ padding: '16px' }}>
+          <div className="empty-state" style={{ marginBottom: 20 }}>
+            <svg className="empty-state-icon spin" viewBox="0 0 24 24" fill="none" stroke="var(--c-accent)" strokeWidth="1.5">
+              <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            <div className="empty-state-title">
+              {isDiscovering ? 'Discovering media files…' : 'Indexing your folders…'}
+            </div>
+            <div className="empty-state-body">
+              {isDiscovering
+                ? 'Walking configured sources and analyzing directory tree.'
+                : `Indexed ${status?.files_scanned.toLocaleString()} of ${status?.files_total.toLocaleString()} files. Folders will appear automatically.`}
+            </div>
+          </div>
+          <div className="folders-grid">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--c-border)' }}>
+                <div className="skeleton" style={{ aspectRatio: '16/9' }} />
+                <div style={{ padding: '8px 12px' }}>
+                  <div className="skeleton" style={{ height: 14, borderRadius: 4, marginBottom: 6 }} />
+                  <div className="skeleton" style={{ height: 10, width: '50%', borderRadius: 4 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : loading && folders.length === 0 ? (
         <div className="folders-grid">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--c-border)' }}>
@@ -80,8 +124,11 @@ export function FoldersPage() {
           </svg>
           <div className="empty-state-title">No folders found</div>
           <div className="empty-state-body">
-            Configure your media roots in <code style={{ color: 'var(--c-amber)' }}>.env</code> and trigger a scan above.
+            Configure your media sources in Settings and trigger a scan above.
           </div>
+          <button className="btn-primary" style={{ marginTop: 12 }} onClick={() => navigate('/settings')}>
+            Go to Settings
+          </button>
         </div>
       ) : (
         <>

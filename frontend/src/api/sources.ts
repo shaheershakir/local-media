@@ -4,6 +4,7 @@ export interface Source {
   path: string
   exists: boolean
   display: string
+  item_count?: number
 }
 
 interface SourcesResponse {
